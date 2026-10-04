@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grail Grove Security Review</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  :root {
+    --ink: #1a1a1a; --muted: #5a5f66; --rule: #d9dde2; --bg-soft: #f4f6f8;
+    --crit: #8b0000; --high: #c0392b; --med: #d68910; --low: #2e86c1; --info: #5d6d7e; --ok: #1e8449;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1 { font-size: 24pt; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 15pt; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 1.5px solid var(--ink); page-break-after: avoid; }
+  h3 { font-size: 12pt; margin: 18px 0 6px; page-break-after: avoid; }
+  p { margin: 6px 0; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9pt; }
+  code { background: var(--bg-soft); padding: 1px 4px; border-radius: 3px; }
+  pre { background: var(--bg-soft); padding: 8px 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; margin: 6px 0; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 9.5pt; page-break-inside: auto; }
+  th, td { border: 1px solid var(--rule); padding: 5px 7px; vertical-align: top; text-align: left; }
+  th { background: var(--bg-soft); font-weight: 600; }
+  tr { page-break-inside: avoid; }
+  .cover { padding-top: 6mm; }
+  .cover .sub { color: var(--muted); font-size: 12pt; margin-bottom: 30px; }
+  .meta { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 10px 0; }
+  .meta td { border: none; padding: 3px 12px 3px 0; }
+  .meta td:first-child { color: var(--muted); width: 150px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff; font-size: 8.5pt; font-weight: 600; letter-spacing: 0.02em; }
+  .crit { background: var(--crit); } .high { background: var(--high); } .med { background: var(--med); } .low { background: var(--low); } .info { background: var(--info); } .ok { background: var(--ok); }
+  .finding { border: 1px solid var(--rule); border-left: 4px solid var(--rule); border-radius: 4px; padding: 10px 14px; margin: 12px 0; page-break-inside: avoid; }
+  .finding.med { border-left-color: var(--med); background: #fff; }
+  .finding.low { border-left-color: var(--low); background: #fff; }
+  .finding.info { border-left-color: var(--info); background: #fff; }
+  .finding h3 { margin: 0 0 6px; }
+  .finding .where { color: var(--muted); font-size: 9pt; margin-bottom: 6px; }
+  .finding dt { font-weight: 600; margin-top: 6px; }
+  .finding dd { margin: 2px 0 0 0; }
+  .summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 10px 0 14px; }
+  .tile { border: 1px solid var(--rule); border-radius: 4px; padding: 8px; text-align: center; }
+  .tile .n { font-size: 20pt; font-weight: 700; line-height: 1; }
+  .tile .l { color: var(--muted); font-size: 8.5pt; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .pb { page-break-before: always; }
+  .note { background: var(--bg-soft); border-left: 3px solid var(--muted); padding: 8px 12px; margin: 10px 0; }
+  ul { margin: 4px 0 8px; padding-left: 20px; } li { margin: 2px 0; }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <h1>Grail Grove</h1>
+  <div class="sub">Solana program security review: non-custodial 1-for-1 Chimpions NFT swap</div>
+  <table class="meta">
+    <tr><td>Repository</td><td>thechimpions/grail-grove</td></tr>
+    <tr><td>Commit reviewed</td><td><code>393a4a4</code> ("Move to own repo for audit")</td></tr>
+    <tr><td>Program ID</td><td><code>6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC</code></td></tr>
+    <tr><td>Framework</td><td>Anchor 0.32.x, mpl-token-metadata 5.1.1, spl-token 8.0</td></tr>
+    <tr><td>Review date</td><td>4 October 2026</td></tr>
+    <tr><td>Reviewer</td><td>Claude (automated code review with manual reasoning)</td></tr>
+  </table>
+
+  <h2 style="margin-top:36px">Executive summary</h2>
+  <p>The on-chain program is small (eight instructions, roughly 600 lines of Rust) and well constructed. Every account is constrained by seeds, owner, type or address, the admin bootstrap is bound to the program's upgrade authority, authority transfer is two-step, fee math is overflow-safe, and the freeze-plus-delegate escrow is applied atomically. I found <strong>no path for a third party to drain listed NFTs, steal fees, or take over the admin role</strong> through the program itself.</p>
+  <p>The material risk sits around the program rather than in it. The program is upgradeable, so whoever holds the upgrade authority can replace the code and sweep every frozen listing, and the mainnet deploy script hands both that authority and the config admin to a pasted address with no proof that anyone can sign for it. Those two items are rated Medium. Everything else is Low or Informational: defense-in-depth checks the program currently gets for free from SPL Token semantics, a leftover delegate approval after admin eject, treasury account hygiene, and operational hardening of the scripts.</p>
+
+  <div class="summary-grid">
+    <div class="tile"><div class="n" style="color:var(--crit)">0</div><div class="l">Critical</div></div>
+    <div class="tile"><div class="n" style="color:var(--high)">0</div><div class="l">High</div></div>
+    <div class="tile"><div class="n" style="color:var(--med)">2</div><div class="l">Medium</div></div>
+    <div class="tile"><div class="n" style="color:var(--low)">6</div><div class="l">Low</div></div>
+    <div class="tile"><div class="n" style="color:var(--info)">7</div><div class="l">Informational</div></div>
+    <div class="tile"><div class="n" style="color:var(--ok)">43+8</div><div class="l">Tests reviewed</div></div>
+  </div>
+
+  <table>
+    <tr><th style="width:60px">ID</th><th style="width:90px">Severity</th><th>Title</th><th style="width:150px">Area</th></tr>
+    <tr><td>M-01</td><td><span class="pill med">Medium</span></td><td>Upgrade authority has unilateral control over every listed NFT</td><td>Trust model / deployment</td></tr>
+    <tr><td>M-02</td><td><span class="pill med">Medium</span></td><td>Deploy script hands admin and upgrade authority to an unverified address, irreversibly</td><td>scripts/deploy-mainnet.ts</td></tr>
+    <tr><td>L-01</td><td><span class="pill low">Low</span></td><td>Swap and list rely on SPL Token frozen-account semantics instead of explicit checks</td><td>swap.rs, list.rs</td></tr>
+    <tr><td>L-02</td><td><span class="pill low">Low</span></td><td>Eject leaves a live SPL delegate approval on the owner's token account</td><td>eject.rs</td></tr>
+    <tr><td>L-03</td><td><span class="pill low">Low</span></td><td>Treasury is not required to be a system-owned account; misconfiguration halts all swaps</td><td>initialize.rs, update_config.rs</td></tr>
+    <tr><td>L-04</td><td><span class="pill low">Low</span></td><td>Fee parameters change instantly and apply retroactively to open listings</td><td>update_config.rs, swap.rs</td></tr>
+    <tr><td>L-05</td><td><span class="pill low">Low</span></td><td>Helius API key is passed on child-process command lines</td><td>scripts</td></tr>
+    <tr><td>L-06</td><td><span class="pill low">Low</span></td><td>Admin CLI defaults to mainnet and the default Solana keypair</td><td>scripts/admin.ts</td></tr>
+    <tr><td>I-01</td><td><span class="pill info">Info</span></td><td>Listings are open offers with no expiry or trait filter (adverse selection)</td><td>Design</td></tr>
+    <tr><td>I-02</td><td><span class="pill info">Info</span></td><td>Unverified mainnet assumptions: collection token standard and freeze authority</td><td>Deployment</td></tr>
+    <tr><td>I-03</td><td><span class="pill info">Info</span></td><td>No verifiable-build step; declared and resolved Anchor versions differ</td><td>Build / supply chain</td></tr>
+    <tr><td>I-04</td><td><span class="pill info">Info</span></td><td><code>active_listings</code> uses saturating subtraction</td><td>delist.rs, swap.rs, eject.rs</td></tr>
+    <tr><td>I-05</td><td><span class="pill info">Info</span></td><td>Misleading error code on eject owner mismatch</td><td>eject.rs</td></tr>
+    <tr><td>I-06</td><td><span class="pill info">Info</span></td><td>Test coverage gaps</td><td>tests/</td></tr>
+    <tr><td>I-07</td><td><span class="pill info">Info</span></td><td>Dependency and advisory notes</td><td>Cargo.lock</td></tr>
+  </table>
+</section>
+
+<section class="pb">
+<h2>1. Scope and method</h2>
+<p>Everything in the repository was read in full: the Anchor program (<code>programs/grail-grove/src</code>, all eight instruction handlers, state, errors, events, fee math and metadata validation), the three operational scripts (<code>admin.ts</code>, <code>deploy-mainnet.ts</code>, <code>devnet-setup.ts</code>), the IDL sync script, the Mocha integration suite (43 cases) and its helpers, <code>Anchor.toml</code>, both <code>Cargo.toml</code> files, <code>Cargo.lock</code>, <code>package.json</code> and <code>.gitignore</code>.</p>
+<p>The review focused on the attack classes that matter for a Solana NFT escrow:</p>
+<ul>
+  <li>Missing or weak account validation: signer, owner, PDA seeds and bump, program-ID pinning, type cosplay, account substitution and duplicate-mutable accounts.</li>
+  <li>Privilege: admin bootstrap front-running, authority takeover, re-initialization, upgrade-authority exposure.</li>
+  <li>Asset safety: any way to move a listed NFT without a matching swap, to receive a listed NFT without surrendering one, to collect fees without delivering, or to brick a listing so the owner cannot recover it.</li>
+  <li>Token-program semantics: what SPL Token and Token Metadata permit on a frozen, delegated token account, verified against the upstream sources rather than from memory.</li>
+  <li>Arithmetic, rent and lamport flows; pause semantics; CPI signer-seed leakage.</li>
+  <li>Operational security of deployment, key handling and secrets.</li>
+</ul>
+<p>Verification performed in this environment: the Rust unit tests compile and pass (8 of 8). The upstream SPL Token processor and Metaplex freeze and thaw processors were fetched and inspected to confirm the invariants the program depends on. The Anchor integration suite was not executed here because it needs a local validator with a mainnet clone of Token Metadata, which this container's network policy blocks. Mainnet RPC was also blocked, so on-chain state (collection, treasury, program) could not be inspected; see I-02.</p>
+
+<h2>2. System overview</h2>
+<p>A holder lists a Chimpion without giving up custody: the <code>list</code> instruction approves the per-mint <code>Listing</code> PDA as SPL delegate for one token, then the PDA calls Token Metadata's <code>FreezeDelegatedAccount</code> so the mint's master edition (the freeze authority) freezes the holder's token account. A taker calls <code>swap</code> with any other verified Chimpion: they pay a flat fee that is split between the treasury and the lister, the PDA thaws the listed account and delegate-transfers the NFT to the taker, and the taker transfers their NFT to the lister. <code>delist</code> (owner) and <code>eject</code> (admin) thaw and close. Admin is a Squads vault with pause, fee and treasury controls and a two-step handoff.</p>
+
+<h3>Security invariant the whole design rests on</h3>
+<p>While a listing exists, the listed token account is frozen and its delegate is the Listing PDA. I confirmed against the SPL Token processor that a frozen account rejects <code>Transfer</code>, <code>Burn</code>, <code>Approve</code>, <code>Revoke</code> and <code>SetAuthority</code>, and that <code>CloseAccount</code> requires a zero balance. Only the master edition PDA can thaw, and Token Metadata only signs that thaw when the current delegate signs (<code>assert_signer(delegate)</code> plus <code>assert_delegated_tokens</code>). The Listing PDA signs only inside <code>delist</code>, <code>swap</code> and <code>eject</code>, each of which closes the listing. So between <code>list</code> and one of those three, nobody can move, re-delegate, re-own or close the listed account. That invariant holds in the code as written.</p>
+
+<h2>3. Attack scenarios examined</h2>
+<table>
+  <tr><th style="width:46%">Scenario</th><th>Outcome</th></tr>
+  <tr><td>Front-run <code>initialize</code> after deploy to seize admin</td><td><span class="pill ok">Blocked</span> Payer must equal <code>ProgramData.upgrade_authority_address</code>, and the ProgramData account is bound to the program via <code>programdata_address()</code>, so a foreign ProgramData cannot be substituted.</td></tr>
+  <tr><td>Re-initialize or close the <code>Config</code> PDA</td><td><span class="pill ok">Blocked</span> <code>init</code> fails on an existing account; no instruction closes or reallocates config.</td></tr>
+  <tr><td>Set <code>authority</code> or <code>pending_authority</code> without the current authority</td><td><span class="pill ok">Blocked</span> <code>has_one = authority</code> on propose, update, eject; accept requires the pending key to sign and be non-default.</td></tr>
+  <tr><td>Thaw or transfer a listed NFT from outside the program</td><td><span class="pill ok">Blocked</span> Requires the Listing PDA signature or master edition signature; neither is obtainable.</td></tr>
+  <tr><td>Change the owner of the listed token account, then swap or delist with the new owner</td><td><span class="pill ok">Blocked</span> <code>SetAuthority(AccountOwner)</code> is rejected on frozen accounts (spl-token processor line 436).</td></tr>
+  <tr><td>Swap with a substituted <code>lister</code>, <code>treasury</code>, listing or token account</td><td><span class="pill ok">Blocked</span> <code>listing.owner == lister</code>, <code>address = config.treasury</code>, listing seeds bound to <code>listed_mint</code>, <code>lister_listed_token_account == listing.token_account</code>.</td></tr>
+  <tr><td>Receive the listed NFT without surrendering one (fake, fungible, pNFT or non-collection offer)</td><td><span class="pill ok">Blocked</span> Offered mint must have supply 1 and 0 decimals; metadata PDA and owner enforced; mint match, legacy standard and verified collection asserted; taker signs the transfer and must hold exactly one.</td></tr>
+  <tr><td>Offer an NFT that is itself listed (frozen) or the same mint</td><td><span class="pill ok">Blocked</span> Transfer fails on frozen source; <code>SameMint</code> constraint.</td></tr>
+  <tr><td>Lister collects the fee share but keeps the NFT</td><td><span class="pill ok">Blocked</span> Fee transfer and delegate transfer are in one instruction; any failure reverts both.</td></tr>
+  <tr><td>Admin raises the fee between quote and execution</td><td><span class="pill ok">Blocked</span> <code>max_fee_lamports</code> slippage guard, provided the client passes the displayed fee (see L-04).</td></tr>
+  <tr><td>Lister front-runs a swap by delisting and relisting, or moving the NFT to an accomplice who relists</td><td><span class="pill ok">Blocked</span> The taker's transaction pins owner, token account and mint; any change fails the constraints.</td></tr>
+  <tr><td>Grief a listing by funding or pre-creating the Listing PDA or ATAs</td><td><span class="pill ok">Harmless</span> Anchor <code>init</code> tolerates pre-funded PDAs; only the ATA program can create ATAs; lamports sent to the listing are refunded on close.</td></tr>
+  <tr><td>Signer-seed leakage via CPI to an attacker program</td><td><span class="pill ok">Blocked</span> Token, ATA and System programs are typed; Token Metadata is pinned by address.</td></tr>
+  <tr><td>Arithmetic overflow in fee split or counters</td><td><span class="pill ok">Blocked</span> u128 checked math, bps capped at 10,000, fee capped at 1 SOL, <code>overflow-checks = true</code>.</td></tr>
+  <tr><td>Use pause to trap listers' NFTs</td><td><span class="pill ok">Blocked</span> <code>delist</code> and <code>eject</code> work while paused.</td></tr>
+  <tr><td>Upgrade the program to a malicious version and sweep listings</td><td><span class="pill med">Possible for the upgrade authority</span> See M-01.</td></tr>
+  <tr><td>Deploy with a mistyped multisig address</td><td><span class="pill med">Unrecoverable</span> See M-02.</td></tr>
+</table>
+</section>
+
+<section class="pb">
+<h2>4. Findings</h2>
+
+<div class="finding med">
+  <h3><span class="pill med">Medium</span> &nbsp;M-01. Upgrade authority has unilateral control over every listed NFT</h3>
+  <div class="where">Anchor.toml (<code>upgradeable = true</code>), scripts/deploy-mainnet.ts steps 4 and 5, program-wide</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>The program is deployed upgradeable and the upgrade authority is handed to the Squads vault. An upgrade can replace the program with code that signs as any Listing PDA and delegate-transfers every frozen, listed NFT to an arbitrary wallet in a single transaction per listing. Nothing in the program limits this, because by design the Listing PDA is the only key that can thaw and move a listed token. The config admin, by contrast, is well scoped: <code>eject</code> only ever returns the NFT to its owner and no admin instruction can redirect an NFT.</dd>
+    <dt>Impact</dt>
+    <dd>Compromise of the vault's signers (or a collusion at threshold) means total loss of all open listings. Users are told the swap is non-custodial, but in practice custody is "anyone who can upgrade the program".</dd>
+    <dt>Recommendation</dt>
+    <dd>
+      <ul>
+        <li>Document the vault's member count and threshold publicly, and use a Squads time lock on the vault so an upgrade proposal is visible for a period during which listers can delist.</li>
+        <li>Publish a verifiable build (<code>solana-verify</code> / Anchor verified builds, see I-03) so the deployed bytecode can be matched to this reviewed commit.</li>
+        <li>Once the program has been live and stable, consider making it immutable (set the upgrade authority to none). The config admin still retains pause, fee and eject, which is enough for day-to-day operation.</li>
+        <li>Keep the open-listing count small relative to the collection by nudging listers to delist when idle (see I-01 on expiry).</li>
+      </ul>
+    </dd>
+  </dl>
+</div>
+
+<div class="finding med">
+  <h3><span class="pill med">Medium</span> &nbsp;M-02. Deploy script hands admin and upgrade authority to an unverified address, irreversibly</h3>
+  <div class="where">scripts/deploy-mainnet.ts lines 83, 159–167, 217–241, 265–278</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>The <code>--multisig</code> flag is parsed as a public key and then used three times: as <code>Config.authority</code> inside <code>initialize</code>, as the IDL authority, and as the program upgrade authority with <code>--skip-new-upgrade-authority-signer-check</code>. The only sanity check is a warning if the key is on the ed25519 curve. The "verify" step compares the on-chain values back to the same command-line input, so a typo, a settings-account address pasted instead of the vault address, or a vault from the wrong Squads deployment all pass verification.</dd>
+    <dt>Impact</dt>
+    <dd>If the address is wrong, nobody can sign for it. <code>Config.authority</code> can only be changed by itself via <code>propose_authority</code>, so the program can never be paused, re-priced or unwound. The upgrade authority is lost with it, so the program also cannot be fixed. There is no recovery path short of abandoning the program ID, and any listings created in the meantime can only be closed by their owners via <code>delist</code>.</dd>
+    <dt>Recommendation</dt>
+    <dd>
+      <ul>
+        <li>Before anything irreversible, prove control of the address: fetch the Squads multisig settings account the operator names, derive the vault PDA from it and the vault index, and require equality with <code>--multisig</code>. Better still, require the vault to have executed at least one transaction on mainnet (for example a 0 SOL transfer to itself) and check for it.</li>
+        <li>Make the config handoff recoverable: initialize with the deployer as <code>authority</code>, then run <code>propose_authority(vault)</code> and have the vault execute <code>accept_authority</code>. That exercises the vault's signing path before the upgrade authority is moved, and a bad address simply fails to accept. The script's current rationale ("deployer is never admin, not even briefly") trades a few minutes of deployer admin for an unrecoverable failure mode; with a dry run and a verified build the trade is worth making.</li>
+        <li>Only after the vault has accepted config authority, transfer the upgrade authority, and run <code>solana program show</code> plus <code>pnpm admin show</code> as the final check.</li>
+      </ul>
+    </dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-01. Swap and list rely on SPL Token frozen-account semantics instead of explicit checks</h3>
+  <div class="where">swap.rs lines 66–72; list.rs lines 39, 64–70</div>
+  <dl>
+    <dt>Description</dt>
+    <dd><code>swap</code> checks that <code>lister_listed_token_account</code> is the account recorded at list time and holds one token, but not that its <code>owner</code> is still <code>lister</code> or that its <code>mint</code> is <code>listed_mint</code>. <code>list</code> checks the owner's token account but, unlike <code>swap</code>'s check on the offered mint, does not assert <code>mint.supply == 1 &amp;&amp; mint.decimals == 0</code>. Both are safe today: a frozen token account cannot change owner or mint, and a Token Metadata edition account cannot exist for a mint that was not single-supply when the edition was created. The safety is inherited from two external programs rather than stated in this one.</dd>
+    <dt>Impact</dt>
+    <dd>None currently. The risk is latent: a future change to SPL Token semantics, a future instruction in this program that thaws without closing, or a Token-2022 variant would silently remove the protection.</dd>
+    <dt>Recommendation</dt>
+    <dd>Add the cheap explicit constraints: in <code>swap</code>, <code>lister_listed_token_account.owner == lister.key()</code> and <code>.mint == listed_mint.key()</code>; in <code>list</code>, <code>mint.supply == 1 &amp;&amp; mint.decimals == 0</code>, and optionally <code>mint.freeze_authority == Some(master_edition.key())</code> to fail with a clear error rather than a CPI error.</dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-02. Eject leaves a live SPL delegate approval on the owner's token account</h3>
+  <div class="where">eject.rs lines 14–18, 80–98</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>After <code>eject</code>, the owner's token account is thawed and the listing closed, but the account still carries <code>delegate = Listing PDA, delegated_amount = 1</code>. The code comments acknowledge this and argue it is inert because no instruction can sign for a PDA whose listing account no longer exists. That reasoning is correct for the current code: the three signing instructions all require a live <code>Listing</code> whose <code>token_account</code> matches, and <code>list</code> re-approves anyway.</dd>
+    <dt>Impact</dt>
+    <dd>Wallets and security tools display the approval as an active third-party spend permission on the NFT, which will generate support load and distrust. It also sets a trap for future maintainers: if any later version adds an instruction in which the Listing PDA signs a token transfer without the <code>listing.token_account</code> binding, every previously ejected account becomes drainable.</dd>
+    <dt>Recommendation</dt>
+    <dd>The program cannot revoke on the owner's behalf. Surface the state in the web app after an eject with a one-click SPL <code>Revoke</code>, document it in the user-facing FAQ, and add a code comment on <code>swap</code>'s <code>lister_listed_token_account</code> constraint noting that it is the control that keeps stale approvals inert.</dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-03. Treasury is not required to be a system-owned account; misconfiguration halts all swaps</h3>
+  <div class="where">initialize.rs lines 31–37; update_config.rs lines 25–31; swap.rs lines 137–148</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>The only on-chain constraint on the treasury is "not the default key and has at least one lamport". The deploy script checks system ownership off-chain, but <code>update_config</code> accepts any funded account. If the admin sets the treasury to an executable account, a PDA of another program, or a token account, the system-program transfer in <code>swap</code> either fails (executable accounts cannot receive lamports) or sends fees somewhere they cannot be spent. Separately, if the treasury is a normal wallet that is later drained to zero, a swap whose treasury share is below the rent-exempt minimum for a zero-data account (890,880 lamports) fails the runtime rent check. At the default 0.02 SOL fee and 50% split the share is 10,000,000 lamports, so this only bites with fees under roughly 0.0018 SOL.</dd>
+    <dt>Impact</dt>
+    <dd>Admin-only, so not an exploit, but a plausible misconfiguration that stops every swap until corrected, and fees could be permanently stranded.</dd>
+    <dt>Recommendation</dt>
+    <dd>Add <code>owner == system_program::ID</code> to both treasury constraints and require <code>lamports() &gt;= Rent::minimum_balance(0)</code>. Keep the deploy-script check as well.</dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-04. Fee parameters change instantly and apply retroactively to open listings</h3>
+  <div class="where">update_config.rs; swap.rs lines 133–135; state.rs lines 8–10</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>The admin can move <code>swap_fee_lamports</code> anywhere up to 1 SOL and <code>treasury_bps</code> anywhere up to 100% in one transaction. The lister's share is computed at swap time from the current config, so a lister who posted when the split was 50/50 may receive nothing if the split is 100/0 when a taker arrives. Takers are protected by <code>max_fee_lamports</code>, but only if the client sets it to the fee it displayed rather than a generous ceiling.</dd>
+    <dt>Impact</dt>
+    <dd>Trust and UX rather than theft: the admin is a multisig and the cap is 1 SOL. A 0.02 SOL to 1 SOL jump would still surprise anyone whose client passes <code>u64::MAX</code> as the max.</dd>
+    <dt>Recommendation</dt>
+    <dd>In the web app, pass exactly the quoted fee as <code>max_fee_lamports</code>. On-chain, consider either snapshotting <code>treasury_bps</code> into the <code>Listing</code> at list time, or a Squads time lock on config changes so listers can react.</dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-05. Helius API key is passed on child-process command lines</h3>
+  <div class="where">scripts/deploy-mainnet.ts lines 207–241; scripts/devnet-setup.ts line 333</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>Both scripts build <code>anchor deploy</code>, <code>anchor idl set-authority</code> and <code>solana program set-upgrade-authority</code> command strings that embed the full RPC URL including <code>?api-key=…</code>, and run them with <code>execSync</code>. The key is visible to any process on the machine via <code>ps</code>, lands in CI logs that echo commands, and the shell-splitting <code>execSync</code> path means an RPC URL containing shell metacharacters would be interpreted. Console output is correctly redacted; the subprocess argv is not.</dd>
+    <dt>Recommendation</dt>
+    <dd>Pass the RPC URL to the Solana tooling through its config file or environment (<code>ANCHOR_PROVIDER_URL</code>, <code>solana config set --url</code> in a temporary config dir) instead of argv, and use <code>spawnSync</code> with an argument array rather than a shell string.</dd>
+  </dl>
+</div>
+
+<div class="finding low">
+  <h3><span class="pill low">Low</span> &nbsp;L-06. Admin CLI defaults to mainnet and the default Solana keypair</h3>
+  <div class="where">scripts/admin.ts lines 111–152</div>
+  <dl>
+    <dt>Description</dt>
+    <dd>With neither <code>--cluster</code> nor <code>--rpc</code>, the CLI targets <code>api.mainnet-beta.solana.com</code>, and without <code>--keypair</code> it signs with <code>~/.config/solana/id.json</code>. A developer who forgets a flag while iterating on devnet sends a signed mainnet transaction. Today only <code>initialize</code> could succeed with a non-multisig key, and only from the deployer, but the default still points the sharp end at production.</dd>
+    <dt>Recommendation</dt>
+    <dd>Require <code>--cluster</code> or <code>--rpc</code> explicitly, and require <code>--keypair</code> whenever a transaction will be sent. Print a confirmation prompt when the resolved cluster is mainnet and <code>--print</code> is not set.</dd>
+  </dl>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-01. Listings are open offers with no expiry or trait filter (adverse selection)</h3>
+  <div class="where">state.rs <code>Listing</code>; list.rs</div>
+  <dd>A listing says "swap my Chimpion for any verified Chimpion". A rational taker always offers the least desirable one they hold, so listers should expect to receive the floor, and the fee share is their compensation. <code>created_at</code> is recorded but never used; listings never expire, so forgotten listings remain filled-at-floor targets indefinitely (and enlarge the exposure described in M-01). Consider an optional expiry checked in <code>swap</code>, and make the "any Chimpion" semantics prominent in the UI.</dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-02. Unverified mainnet assumptions: collection token standard and freeze authority</h3>
+  <div class="where">deploy-mainnet.ts lines 40–41; metadata.rs lines 21–24</div>
+  <dd>The program only works for legacy NonFungible (or pre-standard) NFTs whose mint freeze authority is the master edition PDA. Mainnet RPC was blocked from this environment, so I could not confirm that the Chimpions collection <code>2k8iNEAB…</code> matches, that the treasury <code>Df7VuBka…</code> is a system wallet, or whether the program ID is already deployed. Before mainnet, confirm a sample of Chimpions have <code>token_standard</code> None or NonFungible and <code>freeze_authority == master_edition</code>; otherwise <code>list</code> fails for every token. The Anchor test suite already covers the pNFT rejection path for the offered side only.</dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-03. No verifiable-build step; declared and resolved Anchor versions differ</h3>
+  <div class="where">deploy-mainnet.ts; programs/grail-grove/Cargo.toml; Cargo.lock</div>
+  <dd>The deploy script records the binary's SHA-256 but nothing ties it to a reproducible build of a public commit. <code>Cargo.toml</code> declares <code>anchor-lang = "0.32.1"</code> while <code>Cargo.lock</code> resolves 0.32.2. Pin exact versions (<code>=0.32.2</code>), build with <code>solana-verify build</code> or <code>anchor build --verifiable</code>, and upload the verification PDA so explorers show the program as verified. This is the main mitigation for the trust gap in M-01.</dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-04. <code>active_listings</code> uses saturating subtraction</h3>
+  <div class="where">delist.rs line 93; swap.rs line 216; eject.rs line 101</div>
+  <dd><code>saturating_sub(1)</code> hides any future accounting bug (a double decrement would read as zero rather than fail). The counter is informational, so this is a maintainability note: <code>checked_sub</code> with an error, matching the <code>checked_add</code> in <code>list</code>, would surface drift immediately.</dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-05. Misleading error code on eject owner mismatch</h3>
+  <div class="where">eject.rs line 34</div>
+  <dd><code>has_one = owner @ GrailGroveError::TokenAccountMismatch</code> reports a token-account error when the <code>owner</code> account does not match the listing. Introduce a dedicated <code>OwnerMismatch</code> error so the admin CLI's failure messages are accurate.</dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-06. Test coverage gaps</h3>
+  <div class="where">tests/grail_grove.test.ts</div>
+  <dd>The 43 integration cases cover the main paths and most negative cases well. Missing cases worth adding, each of which should fail today for the right reason:
+    <ul>
+      <li>Listing a pNFT (only the offered-side pNFT rejection is tested).</li>
+      <li>An NFT whose <code>collection.key</code> is correct but <code>verified</code> is false (the existing "outside the collection" test uses no collection at all).</li>
+      <li>Swap with a substituted <code>lister_listed_token_account</code> or <code>listed_master_edition</code>.</li>
+      <li>Swap where the taker's ATA for the listed mint already exists, and where the lister's ATA for the offered mint already exists.</li>
+      <li>After <code>eject</code>: owner transfers the NFT out and the new holder lists it (exercises the stale-delegate reasoning in L-02).</li>
+      <li><code>propose_authority(Pubkey::default())</code> as a cancellation, followed by a rejected accept.</li>
+      <li>An NFT whose mint freeze authority is not the master edition (list should fail cleanly).</li>
+    </ul>
+  </dd>
+</div>
+
+<div class="finding info">
+  <h3><span class="pill info">Info</span> &nbsp;I-07. Dependency and advisory notes</h3>
+  <div class="where">Cargo.lock, package.json</div>
+  <dd>Resolved: anchor-lang 0.32.2, anchor-spl 0.32.2, mpl-token-metadata 5.1.1, spl-token 8.0.0, spl-associated-token-account 7.0.0, solana-program 2.3.0, curve25519-dalek 4.1.3 (includes the RUSTSEC-2024-0344 timing fix), borsh 0.10.4 and 1.8.1. <code>cargo audit</code> (advisory database as of this review, 276 crates scanned) reports <strong>zero vulnerabilities</strong> and three warnings, all transitive through the Solana SDK and not reachable in on-chain code: <code>bincode 1.3.3</code> unmaintained (RUSTSEC-2025-0141), <code>libsecp256k1 0.6.0</code> unmaintained (RUSTSEC-2025-0161), <code>rand 0.7.3</code> unsound with a custom logger (RUSTSEC-2026-0097). No action is needed beyond tracking Anchor and Solana SDK releases. The Metaplex client's <code>Metadata::from_bytes</code> does not check the account's <code>Key</code> discriminator, but the program binds the account to the metadata PDA and Token Metadata ownership, which is sufficient. JavaScript dependencies are devDependencies only; nothing from this repository ships to end users.</dd>
+</div>
+</section>
+
+<section class="pb">
+<h2>5. What the program does well</h2>
+<ul>
+  <li><strong>Admin bootstrap cannot be front-run.</strong> <code>initialize</code> requires the payer to be the program's upgrade authority and binds the <code>ProgramData</code> account to the program through <code>programdata_address()</code>, the pattern Anchor recommends.</li>
+  <li><strong>Two-step authority handoff</strong> with a non-default check on accept, so a mistyped proposal cannot brick admin.</li>
+  <li><strong>Every PDA is seed-checked</strong> with a stored canonical bump; Metaplex PDAs use <code>seeds::program</code> plus an owner check; the Token Metadata program is pinned by address and Token, ATA and System are typed.</li>
+  <li><strong>Collection gating is correct:</strong> metadata PDA derived from the mint, mint equality, legacy token standard only, and <code>collection.verified &amp;&amp; key == config.collection</code>.</li>
+  <li><strong>Escrow is atomic:</strong> approve and freeze happen in the same instruction; thaw, delegate transfer and counter-transfer happen in the same instruction; <code>close</code> refunds rent to the right party in all three exit paths.</li>
+  <li><strong>Fee math</strong> is done in u128 with checked operations, rounding dust goes to the lister, the fee is capped at 1 SOL and bps at 10,000, and the taker has a slippage guard.</li>
+  <li><strong>Pause is one-directional:</strong> it blocks new listings and swaps but never traps assets.</li>
+  <li><strong>Deployment discipline:</strong> dry-run by default, mainnet genesis check, program-ID and keypair agreement, treasury ownership check, post-deploy verification, redacted logs, and secrets kept out of git.</li>
+  <li><code>overflow-checks = true</code> in the release profile; <code>Box</code>ed accounts to keep the stack small; 43 integration tests and 8 passing unit tests.</li>
+</ul>
+
+<h2>6. Recommended order of work</h2>
+<ol>
+  <li>Decide the upgrade-authority posture (M-01): time lock and published threshold now, verifiable build before launch (I-03), immutability as a later milestone.</li>
+  <li>Rework the deploy handoff so the vault proves it can sign before anything irreversible happens (M-02).</li>
+  <li>Add the defense-in-depth constraints (L-01, L-03) and the error-code and counter cleanups (I-04, I-05). These are a few lines each and do not change behavior for valid transactions.</li>
+  <li>Client work: pass the quoted fee as <code>max_fee_lamports</code> (L-04), show and offer to revoke stale approvals after eject (L-02), make the "any Chimpion" semantics explicit (I-01).</li>
+  <li>Script hardening (L-05, L-06) and the additional tests (I-06).</li>
+  <li>Confirm the mainnet assumptions in I-02 against live data before deploying.</li>
+</ol>
+
+<h2>Appendix A. Files reviewed</h2>
+<table>
+  <tr><th>Path</th><th>Notes</th></tr>
+  <tr><td>programs/grail-grove/src/lib.rs</td><td>Entry points, program ID</td></tr>
+  <tr><td>programs/grail-grove/src/state.rs</td><td><code>Config</code>, <code>Listing</code>, constants</td></tr>
+  <tr><td>programs/grail-grove/src/errors.rs, events.rs</td><td>Error codes and events</td></tr>
+  <tr><td>programs/grail-grove/src/fee.rs</td><td>Fee split and 7 unit tests</td></tr>
+  <tr><td>programs/grail-grove/src/metadata.rs</td><td>Collection membership check</td></tr>
+  <tr><td>programs/grail-grove/src/instructions/*.rs</td><td>initialize, update_config, propose_authority, accept_authority, list, delist, swap, eject</td></tr>
+  <tr><td>scripts/admin.ts, deploy-mainnet.ts, devnet-setup.ts, sync-idl.mjs</td><td>Operations</td></tr>
+  <tr><td>tests/grail_grove.test.ts, tests/helpers/*.ts</td><td>43 integration cases</td></tr>
+  <tr><td>Anchor.toml, Cargo.toml (×2), Cargo.lock, package.json, tsconfig.json, .gitignore</td><td>Configuration</td></tr>
+</table>
+
+<h2>Appendix B. Upstream behaviour verified</h2>
+<table>
+  <tr><th>Claim relied on</th><th>Source checked</th></tr>
+  <tr><td>Frozen token account rejects Approve and Revoke</td><td>solana-program/token <code>processor.rs</code>, <code>process_approve</code> / <code>process_revoke</code> frozen checks</td></tr>
+  <tr><td>Frozen token account rejects SetAuthority (owner cannot be changed)</td><td>same file, <code>process_set_authority</code> line 436</td></tr>
+  <tr><td>CloseAccount requires zero balance for non-native accounts</td><td>same file, <code>process_close_account</code> lines 682–683</td></tr>
+  <tr><td>FreezeDelegatedAccount / ThawDelegatedAccount require the delegate to sign, the delegate to match, delegated amount to equal balance, and the edition to be the mint's freeze authority</td><td>mpl-token-metadata <code>processor/freeze/freeze_delegated_account.rs</code>, <code>thaw_delegated_account.rs</code>, <code>assertions/misc.rs::assert_delegated_tokens</code></td></tr>
+  <tr><td><code>Metadata::from_bytes</code> is plain Borsh deserialization without a key check</td><td>mpl-token-metadata <code>clients/rust/src/generated/accounts/metadata.rs</code></td></tr>
+</table>
+
+<h2>Appendix C. Severity definitions</h2>
+<table>
+  <tr><th style="width:110px">Severity</th><th>Meaning</th></tr>
+  <tr><td><span class="pill crit">Critical</span></td><td>Direct loss of user assets or admin takeover by an unprivileged party, exploitable now.</td></tr>
+  <tr><td><span class="pill high">High</span></td><td>Loss or takeover requiring unusual but realistic conditions, or permanent freezing of user assets.</td></tr>
+  <tr><td><span class="pill med">Medium</span></td><td>Loss or outage requiring a privileged party's compromise or error, or a trust assumption users would reasonably object to.</td></tr>
+  <tr><td><span class="pill low">Low</span></td><td>Defense-in-depth gaps, admin-only misconfiguration, operational hygiene.</td></tr>
+  <tr><td><span class="pill info">Info</span></td><td>Design notes, code quality, test coverage, unverified assumptions.</td></tr>
+</table>
+<p class="small">This review covers the code at the stated commit only. It does not cover the web client, the Squads configuration, or the live mainnet state, none of which are in the repository.</p>
+</section>
+
+</body>
+</html>
