@@ -28,10 +28,13 @@ pub struct Initialize<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// CHECK: fee recipient. Must already exist and be funded so fee
-    /// transfers never fail the rent-exemption check.
+    /// CHECK: fee recipient. Must be a rent-exempt system account: a
+    /// program-owned or executable account could strand fees or make every
+    /// swap's system transfer fail.
     #[account(
-        constraint = treasury.key() != Pubkey::default() && treasury.lamports() > 0
+        constraint = treasury.key() != Pubkey::default()
+            && *treasury.owner == anchor_lang::system_program::ID
+            && treasury.lamports() >= Rent::get()?.minimum_balance(0)
             @ GrailGroveError::InvalidTreasury,
     )]
     pub treasury: UncheckedAccount<'info>,

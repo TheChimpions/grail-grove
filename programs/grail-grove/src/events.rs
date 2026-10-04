@@ -6,6 +6,7 @@ pub struct Listed {
     pub owner: Pubkey,
     pub token_account: Pubkey,
     pub created_at: i64,
+    pub treasury_bps: u16,
 }
 
 #[event]

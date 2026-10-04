@@ -44,5 +44,8 @@ pub struct Listing {
     /// Owner's token account holding the NFT at list time.
     pub token_account: Pubkey,
     pub created_at: i64,
+    /// Treasury share (bps) snapshotted at list time, so a later config
+    /// change cannot retroactively alter what this lister earns.
+    pub treasury_bps: u16,
     pub bump: u8,
 }

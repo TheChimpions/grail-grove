@@ -31,7 +31,7 @@ pub struct Eject<'info> {
         close = owner,
         seeds = [LISTING_SEED, mint.key().as_ref()],
         bump = listing.bump,
-        has_one = owner @ GrailGroveError::TokenAccountMismatch,
+        has_one = owner @ GrailGroveError::OwnerMismatch,
         has_one = mint @ GrailGroveError::TokenAccountMismatch,
     )]
     pub listing: Box<Account<'info, Listing>>,
@@ -98,6 +98,9 @@ pub fn handler(ctx: Context<Eject>) -> Result<()> {
     }
 
     let config = &mut ctx.accounts.config;
+    // Saturating on purpose: this is a recovery path, and an informational
+    // counter must never be able to trap an NFT. `swap` uses checked_sub so
+    // any drift still surfaces.
     config.active_listings = config.active_listings.saturating_sub(1);
 
     emit!(Ejected {

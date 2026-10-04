@@ -145,3 +145,68 @@ export async function mintLegacyNft(params: MintParams): Promise<MintedNft> {
     ownerTokenAccount: getAssociatedTokenAddressSync(web3Mint, owner),
   };
 }
+
+/**
+ * A verified collection member that is NOT a master-edition NFT: FungibleAsset
+ * standard, 0 decimals, supply 1, no edition account, and the mint's freeze
+ * authority is the minting wallet rather than an edition PDA. `list` must
+ * refuse it before touching Token Metadata.
+ */
+export async function mintEditionlessNft(params: MintParams): Promise<MintedNft> {
+  const {
+    connection,
+    authority,
+    owner,
+    collectionMint,
+    collectionAuthority,
+    name = "Editionless Token",
+  } = params;
+
+  const umi = createUmi(connection.rpcEndpoint).use(mplTokenMetadata());
+  umi.use(keypairIdentity(fromWeb3JsKeypair(authority)));
+
+  const mint = generateSigner(umi);
+  await createV1(umi, {
+    mint,
+    authority: umi.identity,
+    payer: umi.identity,
+    name,
+    uri: "https://example.com/editionless.json",
+    sellerFeeBasisPoints: percentAmount(0),
+    tokenStandard: TokenStandard.FungibleAsset,
+    decimals: some(0),
+    collection: collectionMint
+      ? some({ key: fromWeb3JsPublicKey(collectionMint), verified: false })
+      : none(),
+  }).sendAndConfirm(umi);
+
+  await mintV1(umi, {
+    mint: mint.publicKey,
+    authority: umi.identity,
+    amount: 1,
+    tokenOwner: fromWeb3JsPublicKey(owner),
+    tokenStandard: TokenStandard.FungibleAsset,
+  }).sendAndConfirm(umi);
+
+  const [metadataPda] = findMetadataPda(umi, { mint: mint.publicKey });
+  const [masterEditionPda] = findMasterEditionPda(umi, { mint: mint.publicKey });
+
+  if (collectionMint && collectionAuthority) {
+    const collectionUmi = createUmi(connection.rpcEndpoint).use(mplTokenMetadata());
+    collectionUmi.use(keypairIdentity(fromWeb3JsKeypair(collectionAuthority)));
+    await verifyCollectionV1(collectionUmi, {
+      metadata: metadataPda,
+      collectionMint: fromWeb3JsPublicKey(collectionMint),
+      authority: collectionUmi.identity,
+    }).sendAndConfirm(collectionUmi);
+  }
+
+  const web3Mint = toWeb3JsPublicKey(mint.publicKey);
+  return {
+    mint: web3Mint,
+    metadata: toWeb3JsPublicKey(metadataPda),
+    // Derivable address, but no account lives there.
+    masterEdition: toWeb3JsPublicKey(masterEditionPda),
+    ownerTokenAccount: getAssociatedTokenAddressSync(web3Mint, owner),
+  };
+}
