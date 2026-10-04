@@ -1,0 +1,38 @@
+[toolchain]
+anchor_version = "0.32.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+grail_grove = "6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC"
+
+[programs.devnet]
+grail_grove = "6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC"
+
+[programs.mainnet]
+grail_grove = "6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC"
+
+[provider]
+cluster = "localnet"
+wallet = ".keys/test-wallet.json"
+
+[scripts]
+test = "pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.test.ts"
+
+[test]
+startup_wait = 10000
+shutdown_wait = 2000
+# Deploy as an upgradeable program so ProgramData exists: `initialize` only
+# accepts the program's upgrade authority as payer.
+upgradeable = true
+
+[test.validator]
+bind_address = "127.0.0.1"
+url = "https://api.mainnet-beta.solana.com"
+
+# Metaplex Token Metadata: needed to mint test NFTs and for the
+# freeze/thaw-delegated-account CPIs the program makes.
+[[test.validator.clone]]
+address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
