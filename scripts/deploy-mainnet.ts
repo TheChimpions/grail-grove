@@ -18,6 +18,9 @@
  *
  * Without --confirm each run is a dry run: every check runs, nothing is sent.
  *
+ * After this, every code change goes through a vault-owned buffer that the
+ * vault upgrades from Squads: see scripts/prepare-upgrade.ts and SECURITY.md.
+ *
  * Why two runs: the upgrade authority can only be handed to a PDA with
  * --skip-new-upgrade-authority-signer-check, so a wrong address there is
  * unrecoverable, and Config.authority can only be changed by itself. Having
