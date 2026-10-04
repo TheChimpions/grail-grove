@@ -11,10 +11,15 @@
  *   (you)   In Squads, import and execute the printed `accept_authority`
  *           transaction. Config.authority is now the vault.
  *
- *   Run 2   pnpm deploy:prod --finalize --multisig <vault> --keypair <deployer.json> [--confirm]
+ *   Run 2   pnpm deploy:prod --finalize --multisig <vault> --keypair <deployer.json> [--sat] [--confirm]
  *
  *           verifies on chain that the vault accepted, then hands the IDL
  *           authority and the program upgrade authority to it, and re-verifies.
+ *           With --sat the upgrade authority is NOT moved by this script:
+ *           use Squads' Safe Authority Transfer (Programs -> Add Program ->
+ *           Create SAT), where the vault and the deployer co-sign the change
+ *           and no --skip-new-upgrade-authority-signer-check is needed. Run 2
+ *           again afterwards (with or without --sat) to verify.
  *
  * Without --confirm each run is a dry run: every check runs, nothing is sent.
  *
@@ -88,6 +93,8 @@ if (flags.has("help")) {
   --rpc <url>          mainnet RPC for deploy/transactions (default: Helius from HELIUS_API_KEY)
   --idl-cluster <c>    keyless cluster for 'anchor idl set-authority' (default mainnet)
   --finalize           run 2: hand IDL + upgrade authority to the vault
+  --sat                run 2: leave the upgrade authority to a Squads Safe
+                       Authority Transfer instead of the CLI (recommended)
   --confirm            actually send. Without it, this is a dry run.
   --skip-squads-check  allow a --multisig that is not a derivable Squads v4 vault
 `);
@@ -103,6 +110,7 @@ const treasuryBps = Number(flag("treasury-bps") ?? "5000");
 const live = flag("confirm") === "true";
 const finalize = flag("finalize") === "true";
 const idlCluster = flag("idl-cluster") ?? "mainnet";
+const useSat = flag("sat") === "true";
 
 if (!Number.isFinite(feeSol) || feeSol < 0 || feeSol > 1) fail("--fee-sol must be between 0 and 1");
 if (!Number.isInteger(treasuryBps) || treasuryBps < 0 || treasuryBps > 10_000) fail("--treasury-bps must be 0..10000");
@@ -398,7 +406,7 @@ async function finalizeRun(): Promise<void> {
   let needUpgradeAuthority = true;
   if (ua === "missing") fail("ProgramData account not found");
   if (ua && ua.equals(vault)) { needUpgradeAuthority = false; ok("upgrade authority is already the vault"); }
-  else if (ua && ua.equals(deployer.publicKey)) ok("upgrade authority is the deployer; will transfer");
+  else if (ua && ua.equals(deployer.publicKey)) ok("upgrade authority is the deployer", useSat ? "will leave it for a Squads SAT" : "will transfer via CLI");
   else fail(`upgrade authority is ${short(ua)}; this deployer cannot transfer it`);
 
   const idlState = await readIdlAuthority();
@@ -409,12 +417,13 @@ async function finalizeRun(): Promise<void> {
   else fail(`IDL authority is ${idlState.authority.toBase58()}; this deployer cannot transfer it`);
 
   console.log(`\n${checks} checks passed`);
+  const finalizeCmd = `pnpm deploy:prod --finalize --multisig ${vault.toBase58()} --keypair ${keypairPath}${useSat ? " --sat" : ""} --confirm`;
 
   if (!live) {
     console.log(`
 Dry run only. Re-run with --confirm to execute:
   ${needIdlAuthority ? `1. IDL authority     -> ${vault.toBase58()}` : "1. (IDL authority: already done)"}
-  ${needUpgradeAuthority ? `2. upgrade authority -> ${vault.toBase58()}` : "2. (upgrade authority: already done)"}
+  ${needUpgradeAuthority ? (useSat ? "2. upgrade authority: left for a Squads Safe Authority Transfer (--sat)" : `2. upgrade authority -> ${vault.toBase58()}`) : "2. (upgrade authority: already done)"}
   3. verify all three on chain
 `);
     return;
@@ -434,8 +443,6 @@ Dry run only. Re-run with --confirm to execute:
       process.exit(1);
     }
   }
-  const finalizeCmd = `pnpm deploy:prod --finalize --multisig ${vault.toBase58()} --keypair ${keypairPath} --confirm`;
-
   if (needIdlAuthority) {
     console.log("\n1. handing the IDL account to the vault");
     step(
@@ -445,7 +452,16 @@ Dry run only. Re-run with --confirm to execute:
     );
   }
 
-  if (needUpgradeAuthority) {
+  if (needUpgradeAuthority && useSat) {
+    console.log(`
+2. upgrade authority: do this in Squads as a Safe Authority Transfer (SAT)
+   a. Add the deployer ${deployer.publicKey.toBase58()} as a member of the Squad
+      (an execute-only role is enough; remove it afterwards).
+   b. Programs -> Add Program -> ${programId.toBase58()} -> Create SAT.
+   c. Members approve to threshold; then execute the SAT with the deployer wallet.
+   d. Re-run this command to verify: ${finalizeCmd}
+`);
+  } else if (needUpgradeAuthority) {
     console.log("\n2. handing the upgrade authority to the vault");
     step(
       "Upgrade authority transfer",
@@ -463,8 +479,9 @@ Dry run only. Re-run with --confirm to execute:
 
   const ua2 = await readUpgradeAuthority();
   const upgradeOk = ua2 !== "missing" && !!ua2 && ua2.equals(vault);
-  console.log(`  ${upgradeOk ? "ok  " : "FAIL"} upgrade authority is the vault — ${ua2 === "missing" ? "missing" : short(ua2)}`);
-  if (!upgradeOk) bad++;
+  const satPending = !upgradeOk && useSat && ua2 !== "missing" && !!ua2 && ua2.equals(deployer.publicKey);
+  console.log(`  ${upgradeOk ? "ok  " : satPending ? "WAIT" : "FAIL"} upgrade authority is the vault — ${ua2 === "missing" ? "missing" : short(ua2)}${satPending ? " (pending SAT)" : ""}`);
+  if (!upgradeOk && !satPending) bad++;
 
   const idl2 = await readIdlAuthority();
   if (idl2.authority !== "missing") {
@@ -476,6 +493,15 @@ Dry run only. Re-run with --confirm to execute:
 
   if (bad > 0) {
     fail(`${bad} post-deploy check(s) FAILED — the deployer key may still hold power. Fix before announcing.`);
+  }
+
+  if (satPending) {
+    console.log(`
+Everything except the upgrade authority is on the vault. Finish the Safe
+Authority Transfer in Squads, then re-run:
+  ${finalizeCmd}
+`);
+    return;
   }
 
   console.log(`
