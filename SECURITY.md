@@ -73,7 +73,9 @@ can sign:
 2. The vault executes `accept_authority` in Squads.
 3. Only then does the deployer hand over the IDL and upgrade authority. The
    vault address is additionally checked to derive from the given Squads
-   multisig settings account.
+   multisig settings account. For the upgrade authority, prefer Squads'
+   Safe Authority Transfer (`--sat`): the vault and the deployer co-sign the
+   change inside a Squads proposal, so no signer check has to be skipped.
 
 ## Other properties
 
