@@ -55,13 +55,25 @@
   <table class="meta">
     <tr><td>Repository</td><td>thechimpions/grail-grove</td></tr>
     <tr><td>Commit reviewed</td><td><code>393a4a4</code> ("Move to own repo for audit")</td></tr>
+    <tr><td>Re-audit</td><td>branch <code>audit/security-review</code> at <code>e0680b2</code> (remediation of every code-level finding; see sections 7 and 8)</td></tr>
     <tr><td>Program ID</td><td><code>6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC</code></td></tr>
     <tr><td>Framework</td><td>Anchor 0.32.x, mpl-token-metadata 5.1.1, spl-token 8.0</td></tr>
-    <tr><td>Review date</td><td>4 October 2026</td></tr>
+    <tr><td>Review date</td><td>4 October 2026 (initial review and re-audit)</td></tr>
     <tr><td>Reviewer</td><td>Claude (automated code review with manual reasoning)</td></tr>
   </table>
 
-  <h2 style="margin-top:36px">Executive summary</h2>
+  <div class="note" style="margin-top:28px; border-left-color: var(--ok)">
+    <strong>TL;DR: how listed NFTs are protected</strong>
+    <ul>
+      <li><strong>Nobody can take a listed Chimpion.</strong> The NFT never leaves the owner's wallet. It is frozen with the per-mint Listing PDA as its only delegate, and that PDA signs only inside <code>delist</code> (owner), <code>swap</code> (atomic 1-for-1 plus fee) and <code>eject</code> (admin, back to the owner). SPL Token refuses transfer, burn, approve, revoke, owner change and close on a frozen account; Token Metadata thaws only for the signing delegate.</li>
+      <li><strong>Every swap account is pinned.</strong> Lister, treasury, listing, both token accounts, master edition and the offered NFT's metadata are all constrained; the offered NFT must be a verified, legacy Chimpion the taker actually holds; both transfers and the fee happen in one instruction or not at all. The taker's fee is capped by the <code>max_fee_lamports</code> they sign; the lister's split is fixed when they list.</li>
+      <li><strong>The admin cannot drain.</strong> Admin can pause, set fees, change the treasury and eject, and eject only ever returns the NFT to its owner. Admin bootstrap is bound to the program's upgrade authority, so it cannot be front-run, and handoff is two-step.</li>
+      <li><strong>The one remaining power is the upgrade authority</strong>, because new code could sign as any Listing PDA. It is hardened with Squads: the hot wallet deploys, the vault must execute <code>accept_authority</code> before anything irreversible happens (proof it can sign), the upgrade authority moves by Squads Safe Authority Transfer (vault and deployer co-sign; no signer check is skipped), every later upgrade is a vault-owned buffer executed from a Squads proposal that members can verify byte-for-byte, and the vault should carry a time lock so listers can exit before any upgrade runs. Immutability is available later by setting the upgrade authority to none.</li>
+      <li><strong>Status.</strong> No critical or high findings. Every code-level finding is fixed on the <code>audit/security-review</code> branch (PR #2). What remains is operational: the Squads time lock and published threshold, a verifiable build, running the integration suite locally, and confirming the mainnet facts with <code>pnpm verify:mainnet</code>.</li>
+    </ul>
+  </div>
+
+  <h2 style="margin-top:24px">Executive summary</h2>
   <p>The on-chain program is small (eight instructions, roughly 600 lines of Rust) and well constructed. Every account is constrained by seeds, owner, type or address, the admin bootstrap is bound to the program's upgrade authority, authority transfer is two-step, fee math is overflow-safe, and the freeze-plus-delegate escrow is applied atomically. I found <strong>no path for a third party to drain listed NFTs, steal fees, or take over the admin role</strong> through the program itself.</p>
   <p>The material risk sits around the program rather than in it. The program is upgradeable, so whoever holds the upgrade authority can replace the code and sweep every frozen listing, and the mainnet deploy script hands both that authority and the config admin to a pasted address with no proof that anyone can sign for it. Those two items are rated Medium. Everything else is Low or Informational: defense-in-depth checks the program currently gets for free from SPL Token semantics, a leftover delegate approval after admin eject, treasury account hygiene, and operational hardening of the scripts.</p>
 
@@ -71,7 +83,7 @@
     <div class="tile"><div class="n" style="color:var(--med)">2</div><div class="l">Medium</div></div>
     <div class="tile"><div class="n" style="color:var(--low)">6</div><div class="l">Low</div></div>
     <div class="tile"><div class="n" style="color:var(--info)">7</div><div class="l">Informational</div></div>
-    <div class="tile"><div class="n" style="color:var(--ok)">43+8</div><div class="l">Tests reviewed</div></div>
+    <div class="tile"><div class="n" style="color:var(--ok)">53+8</div><div class="l">Tests (after)</div></div>
   </div>
 
   <table>
@@ -330,6 +342,55 @@
   <li>Confirm the mainnet assumptions in I-02 against live data before deploying.</li>
 </ol>
 
+<h2>7. Remediation status (re-audit at <code>e0680b2</code>)</h2>
+<p>All code changes live on branch <code>audit/security-review</code>, pull request #2. Each was re-read against the original finding; the "verified by" column says how far this environment could check it. The Anchor integration suite and the live-cluster scripts could not be run here (no test validator with a Token Metadata clone, no RPC egress), so those rows say so explicitly.</p>
+<table>
+  <tr><th style="width:52px">ID</th><th style="width:150px">Status</th><th>What changed</th><th style="width:160px">Verified by</th></tr>
+  <tr><td>M-01</td><td><span class="pill med">Mitigated</span> ops items remain</td><td>Upgrades now go through a vault-owned buffer prepared by <code>pnpm upgrade:prepare</code> and executed from a Squads proposal; <code>--check &lt;buffer&gt;</code> lets any member compare the on-chain buffer byte-for-byte with a local build. <code>SECURITY.md</code> documents the trust model. Still to do by the team: Squads time lock and published threshold, <code>solana-verify</code> build, later immutability.</td><td>Code review, typecheck. Not run on a cluster.</td></tr>
+  <tr><td>M-02</td><td><span class="pill ok">Fixed</span></td><td>Deploy is two runs. Run 1 deploys, initializes with the deployer as interim admin and proposes the vault; the vault must execute <code>accept_authority</code> in Squads. Run 2 verifies that on chain, then moves IDL and upgrade authority (or leaves the upgrade authority to a Squads Safe Authority Transfer with <code>--sat</code>). The vault must derive from the given Squads settings account and vault index; on-curve addresses are refused. Both runs resume and dry-run by default.</td><td>Code review, typecheck. Not run on a cluster.</td></tr>
+  <tr><td>L-01</td><td><span class="pill ok">Fixed</span></td><td><code>swap</code> asserts the listed token account's owner is the lister and its mint is the listed mint. <code>list</code> asserts supply 1, decimals 0 and freeze authority equal to the master edition, with dedicated errors.</td><td><code>cargo check</code>; new tests written (not run).</td></tr>
+  <tr><td>L-02</td><td><span class="pill info">Documented</span></td><td>Explained in <code>SECURITY.md</code>; a new test proves the stale approval is inert when the NFT changes hands and is relisted. The one-click revoke belongs in the web app, which is outside this repository.</td><td>Code review.</td></tr>
+  <tr><td>L-03</td><td><span class="pill ok">Fixed</span></td><td>Treasury must be system-owned and rent exempt on both <code>initialize</code> and <code>update_config</code>; tests cover an executable account and a mint.</td><td><code>cargo check</code>; tests written.</td></tr>
+  <tr><td>L-04</td><td><span class="pill ok">Fixed</span> client item remains</td><td><code>Listing.treasury_bps</code> is snapshotted at list time and used by <code>swap</code>; a test changes the split to 100% after listing and checks the lister still receives their share. The web app must still pass the quoted fee as <code>max_fee_lamports</code>.</td><td><code>cargo check</code>; test written.</td></tr>
+  <tr><td>L-05</td><td><span class="pill ok">Fixed</span></td><td>Solana/Anchor CLIs run via <code>spawnSync</code> with the RPC URL in a private temporary config file (<code>scripts/lib/solana-cli.ts</code>). The IDL step uses a keyless cluster alias.</td><td>Code review, typecheck.</td></tr>
+  <tr><td>L-06</td><td><span class="pill ok">Fixed</span></td><td><code>admin.ts</code> requires <code>--cluster</code> or <code>--rpc</code>, requires <code>--keypair</code> to send, and asks for interactive confirmation before any mainnet send.</td><td>Code review, typecheck.</td></tr>
+  <tr><td>I-01</td><td><span class="pill info">Documented</span></td><td>"Any Chimpion" semantics stated in <code>SECURITY.md</code>. No on-chain expiry was added; it remains a product decision.</td><td>n/a</td></tr>
+  <tr><td>I-02</td><td><span class="pill med">Pending</span></td><td><code>pnpm verify:mainnet</code> checks a sample of collection members for legacy standard, master edition and freeze authority, the treasury's ownership and rent, and the program/config state. It could not be run from this environment because mainnet RPC is blocked; run it locally before deploying.</td><td>Typecheck only.</td></tr>
+  <tr><td>I-03</td><td><span class="pill med">Open</span></td><td>No verifiable-build step added and Anchor is still declared as a caret range. Build releases with <code>solana-verify</code> and pin <code>=0.32.2</code>.</td><td>n/a</td></tr>
+  <tr><td>I-04</td><td><span class="pill ok">Resolved</span> with a change of mind</td><td><code>swap</code> uses <code>checked_sub</code>. <code>delist</code> and <code>eject</code> deliberately keep <code>saturating_sub</code>: they are recovery paths, and an informational counter must never be able to trap an NFT. The first remediation pass made all three checked; the re-audit reversed the two recovery paths.</td><td><code>cargo check</code>.</td></tr>
+  <tr><td>I-05</td><td><span class="pill ok">Fixed</span></td><td><code>eject</code> reports <code>OwnerMismatch</code>.</td><td>Test updated.</td></tr>
+  <tr><td>I-06</td><td><span class="pill ok">Fixed</span></td><td>Ten new integration cases (53 total): non-system treasury, handoff cancel, pNFT listing, unverified collection member, editionless token, substituted token account and master edition, pre-existing ATAs, fee-split snapshot, eject then transfer then relist. New mint helper for editionless tokens.</td><td>Typecheck. Not executed.</td></tr>
+  <tr><td>I-07</td><td><span class="pill ok">No action</span></td><td>cargo-audit clean; three transitive unmaintained-crate warnings from the Solana SDK.</td><td><code>cargo audit</code>.</td></tr>
+</table>
+
+<h2>8. Re-audit notes</h2>
+<h3>Scope of the second pass</h3>
+<p>Every file touched by the remediation commits was re-read with the same adversarial questions as the first pass: can any new constraint be bypassed, does any new code path let the Listing PDA sign for something it should not, can the new deploy flow leave authority somewhere unintended, and do the scripts handle partial failure. The on-chain diff is small (about 60 lines) and purely additive in checks; no instruction gained a new signer or a new CPI target.</p>
+<h3>Observations on the new code</h3>
+<ul>
+  <li><strong>Constraint ordering.</strong> <code>list</code>'s mint constraint references <code>master_edition</code>, which is declared later in the struct. Anchor resolves this dependency and the program compiles; the integration test for an editionless token exercises exactly this constraint.</li>
+  <li><strong>Fee split snapshot.</strong> Only the split is snapshotted. The flat fee still comes from config so that the admin can lower it for everyone at once; the taker's <code>max_fee_lamports</code> remains the taker's protection. A lister who wants a different split must delist and relist.</li>
+  <li><strong>Treasury check is rent-aware.</strong> <code>Rent::get()?.minimum_balance(0)</code> is evaluated inside the constraint, so the threshold tracks the cluster's rent parameters rather than a hard-coded lamport figure.</li>
+  <li><strong>Deploy run 1 interim admin.</strong> Between run 1 and the vault's acceptance the deployer is config admin. That role can pause, re-price, change the treasury and eject; it cannot move an NFT or lamports to itself except the treasury share of fees, and no listings exist yet at that point. The window is bounded by the team's own speed.</li>
+  <li><strong>Run 2 with <code>--sat</code>.</strong> The script reports the upgrade authority as "pending SAT" rather than failing, and the deployer must be a Squad member to execute the SAT. Remove that membership afterwards; the script cannot do it.</li>
+  <li><strong>Buffer tooling.</strong> The buffer authority is set to the vault before the Squads "Add upgrade" step. The loader requires buffer authority to equal the program's upgrade authority, so the address Squads shows will be the vault; if it ever differs, stop and investigate.</li>
+  <li><strong>Listing account layout changed</strong> (+2 bytes). Any devnet deployment with existing listings must be reset; mainnet is unaffected because the program is not yet deployed.</li>
+</ul>
+<h3>Squads hardening, end to end</h3>
+<ol>
+  <li><code>pnpm deploy:prod --multisig &lt;vault&gt; --squads &lt;settings&gt; --keypair deployer.json --confirm</code>: deploy, initialize with the deployer as interim admin, propose the vault. The vault address must derive as vault N of the settings account under the Squads v4 program.</li>
+  <li>In Squads, import and execute the printed <code>accept_authority</code> transaction. The vault is now the swap admin and has proven it can sign.</li>
+  <li>In Squads, Programs → Add Program → Create SAT; approve to threshold; execute with the deployer wallet (temporarily a member).</li>
+  <li><code>pnpm deploy:prod --finalize --sat … --confirm</code>: transfers the IDL authority and verifies admin, upgrade and IDL authority all sit on the vault.</li>
+  <li>Every release: <code>pnpm upgrade:prepare</code>, then Programs → Add upgrade in Squads with the buffer, spill address and commit link; members run <code>pnpm upgrade:prepare --check &lt;buffer&gt;</code> and compare with a <code>solana-verify</code> build before approving; the time lock gives listers a window to delist.</li>
+</ol>
+<h3>What this environment could not verify</h3>
+<ul>
+  <li>The Anchor integration suite (53 cases) was typechecked but not executed. Run <code>pnpm test</code> locally before merging.</li>
+  <li>The deploy, upgrade, admin and verify scripts were typechecked but never run against a cluster. Rehearse the full sequence above on devnet with a devnet Squad.</li>
+  <li>I-02 remains unconfirmed; <code>pnpm verify:mainnet</code> is the one-command check.</li>
+</ul>
+
 <h2>Appendix A. Files reviewed</h2>
 <table>
   <tr><th>Path</th><th>Notes</th></tr>
@@ -340,7 +401,8 @@
   <tr><td>programs/grail-grove/src/metadata.rs</td><td>Collection membership check</td></tr>
   <tr><td>programs/grail-grove/src/instructions/*.rs</td><td>initialize, update_config, propose_authority, accept_authority, list, delist, swap, eject</td></tr>
   <tr><td>scripts/admin.ts, deploy-mainnet.ts, devnet-setup.ts, sync-idl.mjs</td><td>Operations</td></tr>
-  <tr><td>tests/grail_grove.test.ts, tests/helpers/*.ts</td><td>43 integration cases</td></tr>
+  <tr><td>scripts/prepare-upgrade.ts, verify-mainnet.ts, lib/solana-cli.ts, SECURITY.md</td><td>Added by the remediation; re-audited</td></tr>
+  <tr><td>tests/grail_grove.test.ts, tests/helpers/*.ts</td><td>43 integration cases (53 after remediation)</td></tr>
   <tr><td>Anchor.toml, Cargo.toml (×2), Cargo.lock, package.json, tsconfig.json, .gitignore</td><td>Configuration</td></tr>
 </table>
 
@@ -363,7 +425,7 @@
   <tr><td><span class="pill low">Low</span></td><td>Defense-in-depth gaps, admin-only misconfiguration, operational hygiene.</td></tr>
   <tr><td><span class="pill info">Info</span></td><td>Design notes, code quality, test coverage, unverified assumptions.</td></tr>
 </table>
-<p class="small">This review covers the code at the stated commit only. It does not cover the web client, the Squads configuration, or the live mainnet state, none of which are in the repository.</p>
+<p class="small">This review covers the code at the stated commits only. It does not cover the web client, the Squads configuration, or the live mainnet state, none of which are in the repository.</p>
 </section>
 
 </body>
