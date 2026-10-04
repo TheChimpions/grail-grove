@@ -41,11 +41,11 @@ import {
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { fromWeb3JsKeypair, toWeb3JsPublicKey } from "@metaplex-foundation/umi-web3js-adapters";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
-import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import idl from "../target/idl/grail_grove.json";
 import type { GrailGrove } from "../target/types/grail_grove";
+import { solanaProgramDeploy } from "./lib/solana-cli";
 
 // tsx runs this as CommonJS (see tsconfig "module"), so __dirname is available.
 const programRoot = join(__dirname, "..");
@@ -329,10 +329,15 @@ async function main() {
       `${verb} ${soLen} bytes (max-len ${maxLen}); need ~${budget.toFixed(2)} SOL in the deployer`,
     );
     await ensureFunded(connection, deployer.publicKey, budget);
-    execSync(
-      `anchor deploy --provider.cluster ${rpcUrl} --provider.wallet ${keypairPath} -- --max-len ${maxLen}`,
-      { cwd: programRoot, stdio: "inherit" },
-    );
+    // Keeps the keyed RPC URL out of the child process's argv.
+    solanaProgramDeploy({
+      rpcUrl,
+      keypairPath,
+      soPath,
+      programKeypairPath: join(programRoot, "target", "deploy", "grail_grove-keypair.json"),
+      maxLen,
+      cwd: programRoot,
+    });
   }
 
   // Deploy drains most of the budget; make sure there is room for minting and

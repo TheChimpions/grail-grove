@@ -40,4 +40,10 @@ pub enum GrailGroveError {
     OfferedNotNft,
     #[msg("Math overflow")]
     MathOverflow,
+    #[msg("Owner account does not match the listing")]
+    OwnerMismatch,
+    #[msg("Mint is not a single-supply NFT")]
+    NotNft,
+    #[msg("Mint freeze authority is not the master edition")]
+    InvalidFreezeAuthority,
 }

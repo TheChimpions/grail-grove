@@ -27,7 +27,7 @@ import {
   programDataPda,
   setupTestContext,
 } from "./helpers/setup";
-import { MintedNft, mintLegacyNft, mintPnft } from "./helpers/mint";
+import { MintedNft, mintEditionlessNft, mintLegacyNft, mintPnft } from "./helpers/mint";
 import {
   burnNftAsOwner,
   burnV1AsOwner,
@@ -280,6 +280,19 @@ describe("grail_grove", () => {
       );
     });
 
+    it("rejects a treasury that is not a system account", async () => {
+      // Both are funded, but a system transfer to an executable account fails
+      // and lamports sent to a token-program-owned mint are stranded.
+      await expectRejects(
+        initialize(ctx.upgradeAuthority, initArgs(), TOKEN_PROGRAM_ID),
+        /InvalidTreasury/,
+      );
+      await expectRejects(
+        initialize(ctx.upgradeAuthority, initArgs(), ctx.collectionMint),
+        /InvalidTreasury/,
+      );
+    });
+
     it("creates the config owned by the given authority", async () => {
       await initialize(ctx.upgradeAuthority);
       const config = await fetchConfig();
@@ -327,13 +340,17 @@ describe("grail_grove", () => {
       await expectRejects(updateConfig(ctx.admin, { treasuryBps: 10_001 }), /InvalidBps/);
     });
 
-    it("rejects an unfunded or default treasury", async () => {
+    it("rejects an unfunded, default or non-system treasury", async () => {
       await expectRejects(
         updateConfig(ctx.admin, { newTreasury: Keypair.generate().publicKey }),
         /InvalidTreasury/,
       );
       await expectRejects(
         updateConfig(ctx.admin, { newTreasury: PublicKey.default }),
+        /InvalidTreasury/,
+      );
+      await expectRejects(
+        updateConfig(ctx.admin, { newTreasury: ctx.collectionMint }),
         /InvalidTreasury/,
       );
       expect((await fetchConfig()).treasury.toBase58()).to.equal(
@@ -441,7 +458,68 @@ describe("grail_grove", () => {
 
   // --- list ----------------------------------------------------------------
 
+  describe("authority handoff (cancel)", () => {
+    it("proposing the default pubkey cancels a pending handoff", async () => {
+      const next = await fundedKeypair(ctx.provider, 1);
+      const propose = (pk: PublicKey) =>
+        ctx.program.methods
+          .proposeAuthority(pk)
+          .accountsPartial({ config: ctx.config, authority: ctx.admin.publicKey })
+          .signers([ctx.admin])
+          .rpc();
+      await propose(next.publicKey);
+      expect((await fetchConfig()).pendingAuthority.toBase58()).to.equal(next.publicKey.toBase58());
+      await propose(PublicKey.default);
+      expect((await fetchConfig()).pendingAuthority.toBase58()).to.equal(PublicKey.default.toBase58());
+      await expectRejects(
+        ctx.program.methods
+          .acceptAuthority()
+          .accountsPartial({ config: ctx.config, newAuthority: next.publicKey })
+          .signers([next])
+          .rpc(),
+        /NotPendingAuthority/,
+      );
+      expect((await fetchConfig()).authority.toBase58()).to.equal(ctx.admin.publicKey.toBase58());
+    });
+  });
+
   describe("list", () => {
+    it("rejects a programmable NFT", async () => {
+      const owner = await fundedKeypair(ctx.provider);
+      const nft = await mintPnft({
+        connection: ctx.provider.connection,
+        authority: ctx.upgradeAuthority,
+        owner: owner.publicKey,
+        collectionMint: ctx.collectionMint,
+        collectionAuthority: ctx.upgradeAuthority,
+      });
+      await expectRejects(list(owner, nft), /UnsupportedTokenStandard/);
+    });
+
+    it("rejects an NFT whose collection is set but not verified", async () => {
+      const owner = await fundedKeypair(ctx.provider);
+      const nft = await mintLegacyNft({
+        connection: ctx.provider.connection,
+        authority: ctx.upgradeAuthority,
+        owner: owner.publicKey,
+        collectionMint: ctx.collectionMint,
+        // no collectionAuthority: the collection field stays unverified
+      });
+      await expectRejects(list(owner, nft), /NotInCollection/);
+    });
+
+    it("rejects a token with no master edition (freeze authority is not an edition)", async () => {
+      const owner = await fundedKeypair(ctx.provider);
+      const nft = await mintEditionlessNft({
+        connection: ctx.provider.connection,
+        authority: ctx.upgradeAuthority,
+        owner: owner.publicKey,
+        collectionMint: ctx.collectionMint,
+        collectionAuthority: ctx.upgradeAuthority,
+      });
+      await expectRejects(list(owner, nft), /InvalidFreezeAuthority/);
+    });
+
     it("freezes the NFT in the owner's wallet with the listing as delegate", async () => {
       const owner = await fundedKeypair(ctx.provider);
       const nft = await mintTo(owner.publicKey);
@@ -850,6 +928,86 @@ describe("grail_grove", () => {
       expect(await listingExists(listed)).to.equal(false);
     });
 
+    it("rejects a substituted listed token account", async () => {
+      const lister = await fundedKeypair(ctx.provider);
+      const taker = await fundedKeypair(ctx.provider);
+      const listed = await mintTo(lister.publicKey);
+      const other = await mintTo(lister.publicKey);
+      const offered = await mintTo(taker.publicKey);
+      await list(lister, listed);
+      await expectRejects(
+        swap(taker, lister.publicKey, listed, offered, SWAP_FEE, {
+          listerListedTokenAccount: other.ownerTokenAccount,
+        }),
+        /TokenAccountMismatch/,
+      );
+      expect(await listingExists(listed)).to.equal(true);
+    });
+
+    it("rejects a substituted master edition", async () => {
+      const lister = await fundedKeypair(ctx.provider);
+      const taker = await fundedKeypair(ctx.provider);
+      const listed = await mintTo(lister.publicKey);
+      const offered = await mintTo(taker.publicKey);
+      await list(lister, listed);
+      await expectRejects(
+        swap(taker, lister.publicKey, listed, offered, SWAP_FEE, {
+          listedMasterEdition: offered.masterEdition,
+        }),
+        /ConstraintSeeds|seeds constraint/i,
+      );
+      expect(await listingExists(listed)).to.equal(true);
+    });
+
+    it("works when both destination token accounts already exist", async () => {
+      const lister = await fundedKeypair(ctx.provider);
+      const taker = await fundedKeypair(ctx.provider);
+      const listed = await mintTo(lister.publicKey);
+      const offered = await mintTo(taker.publicKey);
+      await list(lister, listed);
+
+      const takerListedAta = getAssociatedTokenAddressSync(listed.mint, taker.publicKey);
+      const listerOfferedAta = getAssociatedTokenAddressSync(offered.mint, lister.publicKey);
+      await ctx.provider.sendAndConfirm(
+        new Transaction()
+          .add(createAssociatedTokenAccountInstruction(taker.publicKey, takerListedAta, taker.publicKey, listed.mint))
+          .add(createAssociatedTokenAccountInstruction(taker.publicKey, listerOfferedAta, lister.publicKey, offered.mint)),
+        [taker],
+      );
+
+      await swap(taker, lister.publicKey, listed, offered, SWAP_FEE);
+      expect((await getAccount(ctx.provider.connection, takerListedAta)).amount.toString()).to.equal("1");
+      expect((await getAccount(ctx.provider.connection, listerOfferedAta)).amount.toString()).to.equal("1");
+      expect(await listingExists(listed)).to.equal(false);
+    });
+
+    it("pays the lister the treasury split in force when they listed, not the current one", async () => {
+      const lister = await fundedKeypair(ctx.provider);
+      const taker = await fundedKeypair(ctx.provider);
+      const listed = await mintTo(lister.publicKey);
+      const offered = await mintTo(taker.publicKey);
+      await list(lister, listed);
+
+      const listingKey = listingPda(ctx.program.programId, listed.mint);
+      expect((await ctx.program.account.listing.fetch(listingKey)).treasuryBps).to.equal(TREASURY_BPS);
+      const listingLamports = (await ctx.provider.connection.getAccountInfo(listingKey))!.lamports;
+
+      // Admin moves the whole fee to the treasury after the listing was posted.
+      await updateConfig(ctx.admin, { treasuryBps: 10_000 });
+      try {
+        const treasuryBefore = await balance(ctx.treasury.publicKey);
+        const listerBefore = await balance(lister.publicKey);
+        await swap(taker, lister.publicKey, listed, offered, SWAP_FEE);
+        const treasuryFee = Math.floor((SWAP_FEE * TREASURY_BPS) / 10_000);
+        expect((await balance(ctx.treasury.publicKey)) - treasuryBefore).to.equal(treasuryFee);
+        expect((await balance(lister.publicKey)) - listerBefore).to.equal(
+          SWAP_FEE - treasuryFee + listingLamports,
+        );
+      } finally {
+        await updateConfig(ctx.admin, { treasuryBps: TREASURY_BPS });
+      }
+    });
+
     it("cannot be executed twice for the same listing", async () => {
       const lister = await fundedKeypair(ctx.provider);
       const taker = await fundedKeypair(ctx.provider);
@@ -965,8 +1123,38 @@ describe("grail_grove", () => {
       const other = await fundedKeypair(ctx.provider, 1);
       const nft = await mintTo(owner.publicKey);
       await list(owner, nft);
-      await expectRejects(eject(ctx.admin, other.publicKey, nft), /TokenAccountMismatch/);
+      await expectRejects(eject(ctx.admin, other.publicKey, nft), /OwnerMismatch/);
       expect(await listingExists(nft)).to.equal(true);
+    });
+
+    it("after an eject the NFT can change hands and be listed by its new holder", async () => {
+      const owner = await fundedKeypair(ctx.provider);
+      const holder = await fundedKeypair(ctx.provider);
+      const nft = await mintTo(owner.publicKey);
+      await list(owner, nft);
+      await eject(ctx.admin, owner.publicKey, nft);
+
+      // The owner moves the NFT without revoking the leftover approval first.
+      await transferNft(owner, holder.publicKey, nft);
+      const stale = await getAccount(ctx.provider.connection, nft.ownerTokenAccount);
+      expect(stale.amount.toString()).to.equal("0");
+      expect(stale.delegate?.toBase58()).to.equal(
+        listingPda(ctx.program.programId, nft.mint).toBase58(),
+      );
+
+      // The new holder lists from their own account. The stale approval on
+      // the old account is inert: the listing binds to this token account.
+      const held = {
+        ...nft,
+        ownerTokenAccount: getAssociatedTokenAddressSync(nft.mint, holder.publicKey),
+      };
+      await list(holder, held);
+      const listing = await ctx.program.account.listing.fetch(
+        listingPda(ctx.program.programId, nft.mint),
+      );
+      expect(listing.owner.toBase58()).to.equal(holder.publicKey.toBase58());
+      expect(listing.tokenAccount.toBase58()).to.equal(held.ownerTokenAccount.toBase58());
+      await delist(holder, held);
     });
   });
   // --- escrow escape attempts ----------------------------------------------

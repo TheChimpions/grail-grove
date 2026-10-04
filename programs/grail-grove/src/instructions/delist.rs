@@ -90,7 +90,10 @@ pub fn handler(ctx: Context<Delist>) -> Result<()> {
     }
 
     let config = &mut ctx.accounts.config;
-    config.active_listings = config.active_listings.saturating_sub(1);
+    config.active_listings = config
+        .active_listings
+        .checked_sub(1)
+        .ok_or(GrailGroveError::MathOverflow)?;
 
     emit!(Delisted {
         mint: mint_key,
