@@ -63,9 +63,16 @@ pub struct Swap<'info> {
     )]
     pub listed_master_edition: UncheckedAccount<'info>,
 
+    /// The account recorded at list time. Owner and mint cannot have changed
+    /// while frozen (SPL Token rejects SetAuthority on frozen accounts), but
+    /// are re-asserted so the guarantee lives here and not only upstream.
     #[account(
         mut,
         constraint = lister_listed_token_account.key() == listing.token_account
+            @ GrailGroveError::TokenAccountMismatch,
+        constraint = lister_listed_token_account.owner == lister.key()
+            @ GrailGroveError::TokenAccountMismatch,
+        constraint = lister_listed_token_account.mint == listed_mint.key()
             @ GrailGroveError::TokenAccountMismatch,
         constraint = lister_listed_token_account.amount == 1 @ GrailGroveError::NotHoldingToken,
     )]
@@ -130,9 +137,12 @@ pub fn handler(ctx: Context<Swap>, max_fee_lamports: u64) -> Result<()> {
         &config.collection,
     )?;
 
+    // The flat fee is the current config value (the taker agrees to it via
+    // `max_fee_lamports`); the split is the one in force when the lister
+    // posted, so an admin change cannot retroactively cut their share.
     let fee = config.swap_fee_lamports;
     require!(fee <= max_fee_lamports, GrailGroveError::FeeAboveMax);
-    let (treasury_fee, lister_fee) = split_fee(fee, config.treasury_bps)?;
+    let (treasury_fee, lister_fee) = split_fee(fee, ctx.accounts.listing.treasury_bps)?;
 
     if treasury_fee > 0 {
         system_program::transfer(
@@ -213,7 +223,10 @@ pub fn handler(ctx: Context<Swap>, max_fee_lamports: u64) -> Result<()> {
     )?;
 
     let config = &mut ctx.accounts.config;
-    config.active_listings = config.active_listings.saturating_sub(1);
+    config.active_listings = config
+        .active_listings
+        .checked_sub(1)
+        .ok_or(GrailGroveError::MathOverflow)?;
 
     emit!(Swapped {
         listed_mint: listed_mint_key,

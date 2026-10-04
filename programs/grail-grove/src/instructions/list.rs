@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::program_option::COption;
 use anchor_spl::token::{self, Approve, Mint, Token, TokenAccount};
 use mpl_token_metadata::instructions::FreezeDelegatedAccountCpiBuilder;
 
@@ -36,6 +37,15 @@ pub struct List<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
+    /// Single-supply NFT whose freeze authority is its master edition. Both
+    /// are implied by a verified collection member with an edition account,
+    /// but are asserted here so the invariant is stated in this program and
+    /// fails with a clear error rather than a Token Metadata CPI error.
+    #[account(
+        constraint = mint.supply == 1 && mint.decimals == 0 @ GrailGroveError::NotNft,
+        constraint = mint.freeze_authority == COption::Some(master_edition.key())
+            @ GrailGroveError::InvalidFreezeAuthority,
+    )]
     pub mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Metaplex metadata PDA; seeds + owner enforced, contents parsed in handler.
@@ -117,11 +127,13 @@ pub fn handler(ctx: Context<List>) -> Result<()> {
         .invoke_signed(&[seeds])?;
 
     let now = Clock::get()?.unix_timestamp;
+    let treasury_bps = ctx.accounts.config.treasury_bps;
     let listing = &mut ctx.accounts.listing;
     listing.owner = ctx.accounts.owner.key();
     listing.mint = mint_key;
     listing.token_account = ctx.accounts.owner_token_account.key();
     listing.created_at = now;
+    listing.treasury_bps = treasury_bps;
     listing.bump = bump;
 
     let config = &mut ctx.accounts.config;
@@ -135,6 +147,7 @@ pub fn handler(ctx: Context<List>) -> Result<()> {
         owner: listing.owner,
         token_account: listing.token_account,
         created_at: now,
+        treasury_bps,
     });
     Ok(())
 }

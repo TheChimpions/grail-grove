@@ -31,7 +31,7 @@ pub struct Eject<'info> {
         close = owner,
         seeds = [LISTING_SEED, mint.key().as_ref()],
         bump = listing.bump,
-        has_one = owner @ GrailGroveError::TokenAccountMismatch,
+        has_one = owner @ GrailGroveError::OwnerMismatch,
         has_one = mint @ GrailGroveError::TokenAccountMismatch,
     )]
     pub listing: Box<Account<'info, Listing>>,
@@ -98,7 +98,10 @@ pub fn handler(ctx: Context<Eject>) -> Result<()> {
     }
 
     let config = &mut ctx.accounts.config;
-    config.active_listings = config.active_listings.saturating_sub(1);
+    config.active_listings = config
+        .active_listings
+        .checked_sub(1)
+        .ok_or(GrailGroveError::MathOverflow)?;
 
     emit!(Ejected {
         mint: mint_key,
