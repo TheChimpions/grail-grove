@@ -98,10 +98,10 @@ pub fn handler(ctx: Context<Eject>) -> Result<()> {
     }
 
     let config = &mut ctx.accounts.config;
-    config.active_listings = config
-        .active_listings
-        .checked_sub(1)
-        .ok_or(GrailGroveError::MathOverflow)?;
+    // Saturating on purpose: this is a recovery path, and an informational
+    // counter must never be able to trap an NFT. `swap` uses checked_sub so
+    // any drift still surfaces.
+    config.active_listings = config.active_listings.saturating_sub(1);
 
     emit!(Ejected {
         mint: mint_key,
