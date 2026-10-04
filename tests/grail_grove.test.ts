@@ -28,6 +28,14 @@ import {
   setupTestContext,
 } from "./helpers/setup";
 import { MintedNft, mintLegacyNft, mintPnft } from "./helpers/mint";
+import {
+  burnNftAsOwner,
+  burnV1AsOwner,
+  revokeStandardAsOwner,
+  thawAsOwner,
+  transferV1AsOwner,
+  unlockAsOwner,
+} from "./helpers/escape";
 
 const SWAP_FEE = 10_000_000; // 0.01 SOL
 const TREASURY_BPS = 5_000; // 50/50 split
@@ -959,6 +967,74 @@ describe("grail_grove", () => {
       await list(owner, nft);
       await expectRejects(eject(ctx.admin, other.publicKey, nft), /TokenAccountMismatch/);
       expect(await listingExists(nft)).to.equal(true);
+    });
+  });
+  // --- escrow escape attempts ----------------------------------------------
+
+  describe("listed NFT cannot escape the freeze outside the program", () => {
+    let owner: Keypair;
+    let nft: MintedNft;
+    let listing: PublicKey;
+
+    before(async () => {
+      owner = await fundedKeypair(ctx.provider);
+      nft = await mintTo(owner.publicKey);
+      await list(owner, nft);
+      listing = listingPda(ctx.program.programId, nft.mint);
+    });
+
+    afterEach(async () => {
+      const tokenAcc = await getAccount(ctx.provider.connection, nft.ownerTokenAccount);
+      expect(tokenAcc.amount.toString()).to.equal("1");
+      expect(tokenAcc.isFrozen).to.equal(true);
+      expect(tokenAcc.delegate?.toBase58()).to.equal(listing.toBase58());
+      expect(await listingExists(nft)).to.equal(true);
+    });
+
+    const conn = () => ctx.provider.connection;
+
+    it("owner cannot Token Metadata unlock", async () => {
+      await expectRejects(unlockAsOwner(conn(), owner, nft), /Invalid authority type|0x9e/);
+    });
+
+    it("owner cannot thaw by signing as the delegate", async () => {
+      await expectRejects(thawAsOwner(conn(), owner, nft), /not been delegated|0x5c/);
+    });
+
+    it("collection update authority cannot thaw by signing as the delegate", async () => {
+      await expectRejects(
+        thawAsOwner(conn(), ctx.upgradeAuthority, nft),
+        /not been delegated|0x5c/,
+      );
+    });
+
+    it("owner cannot revoke the listing delegate via SPL or Token Metadata", async () => {
+      await expectRejects(
+        ctx.provider.sendAndConfirm(
+          new Transaction().add(createRevokeInstruction(nft.ownerTokenAccount, owner.publicKey)),
+          [owner],
+        ),
+        /frozen|0x11/i,
+      );
+      await expectRejects(
+        revokeStandardAsOwner(conn(), owner, nft, listing),
+        /Delegate not found|0x8e/,
+      );
+    });
+
+    it("owner cannot Token Metadata transfer", async () => {
+      await expectRejects(
+        transferV1AsOwner(conn(), owner, nft, Keypair.generate().publicKey),
+        /"Custom":17|frozen|0x11/i,
+      );
+    });
+
+    it("owner cannot burn with BurnV1", async () => {
+      await expectRejects(burnV1AsOwner(conn(), owner, nft), /frozen|0x11/i);
+    });
+
+    it("owner cannot burn with legacy BurnNft", async () => {
+      await expectRejects(burnNftAsOwner(conn(), owner, nft), /frozen|0x11/i);
     });
   });
 });
