@@ -107,6 +107,59 @@ export function solanaSetUpgradeAuthority(p: UpgradeAuthorityParams): void {
   );
 }
 
+export interface WriteBufferParams {
+  rpcUrl: string;
+  /** Pays for the buffer and is its initial authority. */
+  keypairPath: string;
+  soPath: string;
+  cwd: string;
+}
+
+/**
+ * `solana program write-buffer`: upload the binary to a new buffer account
+ * without touching the program. Returns the buffer address parsed from the
+ * CLI's JSON output.
+ */
+export function solanaWriteBuffer(p: WriteBufferParams): string {
+  return withSolanaConfig(p.rpcUrl, p.keypairPath, (config) => {
+    const res = spawnSync(
+      "solana",
+      ["-C", config, "program", "write-buffer", p.soPath, "--buffer-authority", p.keypairPath, "--output", "json"],
+      { cwd: p.cwd, stdio: ["inherit", "pipe", "inherit"], encoding: "utf8" },
+    );
+    if (res.error) throw res.error;
+    if (res.status !== 0) throw new Error(`solana program write-buffer exited with status ${res.status}`);
+    const parsed = JSON.parse(res.stdout) as { buffer?: string };
+    if (!parsed.buffer) throw new Error(`unexpected write-buffer output: ${res.stdout}`);
+    return parsed.buffer;
+  });
+}
+
+export interface BufferAuthorityParams {
+  rpcUrl: string;
+  /** Current buffer authority keypair. */
+  keypairPath: string;
+  buffer: string;
+  /** New authority; a PDA is fine, no co-signature is required. */
+  newAuthority: string;
+  cwd: string;
+}
+
+export function solanaSetBufferAuthority(p: BufferAuthorityParams): void {
+  withSolanaConfig(p.rpcUrl, p.keypairPath, (config) =>
+    run(
+      "solana",
+      [
+        "-C", config,
+        "program", "set-buffer-authority", p.buffer,
+        "--new-buffer-authority", p.newAuthority,
+        "--buffer-authority", p.keypairPath,
+      ],
+      { cwd: p.cwd },
+    ),
+  );
+}
+
 export interface IdlAuthorityParams {
   /**
    * Anchor's CLI only takes the cluster on the command line, so pass a

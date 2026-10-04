@@ -10,7 +10,8 @@
     "sync-idl": "node scripts/sync-idl.mjs",
     "admin": "tsx scripts/admin.ts",
     "devnet:setup": "tsx scripts/devnet-setup.ts",
-    "deploy:prod": "tsx scripts/deploy-mainnet.ts"
+    "deploy:prod": "tsx scripts/deploy-mainnet.ts",
+    "upgrade:prepare": "tsx scripts/prepare-upgrade.ts"
   },
   "devDependencies": {
     "@coral-xyz/anchor": "0.32.1",
