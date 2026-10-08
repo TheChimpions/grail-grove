@@ -28,8 +28,18 @@ NFT is the `Listing` PDA, and a PDA can only sign inside its own program.
 |---|---|---|
 | Anyone | **No** | Fill a listing by paying the fee and giving a verified Chimpion in the same transaction (`swap`). Both NFTs move atomically or neither does. |
 | The lister | **Only back to themselves** | `delist` at any time, including while the board is paused. |
-| Config admin (Squads vault) | **Only back to its owner** | `eject` thaws and closes a listing, returning control to the owner. Also: pause, set the fee (max 1 SOL), set the split, set the treasury, hand admin to another key via a two-step proposal/accept. No admin instruction can redirect an NFT or lamports to the admin. |
+| Config admin (a team-held key) | **Only back to its owner** | `eject` thaws and closes a listing, returning control to the owner. Also: pause, set the fee (max 1 SOL), set the split for new listings, set the treasury, hand admin to another key via a two-step proposal/accept. No admin instruction can redirect an NFT to anyone or take lamports from users. |
 | Program upgrade authority (Squads vault) | **Yes, by replacing the program** | New code could sign as any `Listing` PDA and transfer every listed NFT. This is the single point of trust in the system. |
+
+The config admin is deliberately a single team-held key rather than the
+multisig, so an emergency pause or eject does not wait for multisig
+approvals. That is safe because the role cannot move an NFT anywhere but
+back to its owner. If that key is compromised, the worst outcomes are a
+paused board, redirected treasury fees, fees raised toward the 1 SOL cap
+(takers still sign a maximum), and the admin role taken away from the team.
+The multisig, as upgrade authority, can recover from any of these with a
+program upgrade. Keep the admin key offline or in a hardware wallet when it
+is not in use.
 
 The program enforces the "anyone" row with explicit constraints, and the
 test suite exercises substitution of every account in `swap` (lister,
@@ -64,18 +74,19 @@ by the Squads vault and used only through the vault:
 The very first deploy cannot go through a vault-owned buffer: the
 upgradeable loader's `DeployWithMaxDataLen` requires the program keypair and
 the upgrade authority to sign the same transaction, and a vault PDA cannot
-co-sign for a fixed program id. `scripts/deploy-mainnet.ts` therefore runs
-in two steps so nothing irreversible happens until the vault has proven it
-can sign:
+co-sign for a fixed program id. `scripts/deploy-mainnet.ts` handles the
+deploy in a single run and never touches the multisig; the full steps are
+at the top of that file:
 
-1. The deployer deploys, initializes with itself as interim admin, and
-   proposes the vault as admin.
-2. The vault executes `accept_authority` in Squads.
-3. Only then does the deployer hand over the IDL and upgrade authority. The
-   vault address is additionally checked to derive from the given Squads
-   multisig settings account. For the upgrade authority, prefer Squads'
-   Safe Authority Transfer (`--sat`): the vault and the deployer co-sign the
-   change inside a Squads proposal, so no signer check has to be skipped.
+1. The deployer deploys, creates the Anchor IDL account straight away,
+   initializes with itself as the config admin (which it stays), publishes
+   the IDL and security.txt as Program Metadata, and verifies all of it on
+   chain, including that the deployed bytes match the local build.
+2. The team then moves the upgrade authority to the multisig with a Safe
+   Authority Transfer in Squads, where the vault and the deployer co-sign
+   inside a Squads proposal, so no signer check has to be skipped. The
+   published IDL and security.txt move with it. Re-running the script with
+   `--verify` confirms the result.
 
 ## Other properties
 

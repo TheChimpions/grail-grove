@@ -55,10 +55,10 @@
   <table class="meta">
     <tr><td>Repository</td><td>thechimpions/grail-grove</td></tr>
     <tr><td>Commit reviewed</td><td><code>393a4a4</code> ("Move to own repo for audit")</td></tr>
-    <tr><td>Re-audit</td><td>branch <code>audit/security-review</code> at <code>e0680b2</code> (remediation of every code-level finding; see sections 7 and 8)</td></tr>
-    <tr><td>Program ID</td><td><code>6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC</code></td></tr>
+    <tr><td>Re-audit</td><td>branch <code>audit-remediation</code> at <code>8378197</code> plus the third pass in section 9 (remediation of every code-level finding, executed verification, Squads handoff)</td></tr>
+    <tr><td>Program ID</td><td><code>GrA1LdMTRsZPrLZLjbZbQ9Cx4XNbyL1bz7enprBkDv49</code> (mainnet; the review began under <code>6hXfvd34…</code>, re-keyed before deploy, code unchanged)</td></tr>
     <tr><td>Framework</td><td>Anchor 0.32.x, mpl-token-metadata 5.1.1, spl-token 8.0</td></tr>
-    <tr><td>Review date</td><td>4 October 2026 (initial review and re-audit)</td></tr>
+    <tr><td>Review date</td><td>4 October 2026 (initial review, re-audit and third pass)</td></tr>
     <tr><td>Reviewer</td><td>Claude (automated code review with manual reasoning)</td></tr>
   </table>
 
@@ -69,7 +69,7 @@
       <li><strong>Every swap account is pinned.</strong> Lister, treasury, listing, both token accounts, master edition and the offered NFT's metadata are all constrained; the offered NFT must be a verified, legacy Chimpion the taker actually holds; both transfers and the fee happen in one instruction or not at all. The taker's fee is capped by the <code>max_fee_lamports</code> they sign; the lister's split is fixed when they list.</li>
       <li><strong>The admin cannot drain.</strong> Admin can pause, set fees, change the treasury and eject, and eject only ever returns the NFT to its owner. Admin bootstrap is bound to the program's upgrade authority, so it cannot be front-run, and handoff is two-step.</li>
       <li><strong>The one remaining power is the upgrade authority</strong>, because new code could sign as any Listing PDA. It is hardened with Squads: the hot wallet deploys, the vault must execute <code>accept_authority</code> before anything irreversible happens (proof it can sign), the upgrade authority moves by Squads Safe Authority Transfer (vault and deployer co-sign; no signer check is skipped), every later upgrade is a vault-owned buffer executed from a Squads proposal that members can verify byte-for-byte, and the vault should carry a time lock so listers can exit before any upgrade runs. Immutability is available later by setting the upgrade authority to none.</li>
-      <li><strong>Status.</strong> No critical or high findings. Every code-level finding is fixed on the <code>audit/security-review</code> branch (PR #2). What remains is operational: the Squads time lock and published threshold, a verifiable build, running the integration suite locally, and confirming the mainnet facts with <code>pnpm verify:mainnet</code>.</li>
+      <li><strong>Status.</strong> No critical or high findings. Every code-level finding is fixed on <code>audit-remediation</code>. The third pass (section 9) executed what the earlier passes could only read: the 60-case integration suite passed on the final binary, the mainnet facts were confirmed against live data, and the deploy script was readied for the 5-of-9 Squads Safe Authority Transfer. Still open and operational: the Squad time lock and a verifiable build.</li>
     </ul>
   </div>
 
@@ -83,7 +83,7 @@
     <div class="tile"><div class="n" style="color:var(--med)">2</div><div class="l">Medium</div></div>
     <div class="tile"><div class="n" style="color:var(--low)">6</div><div class="l">Low</div></div>
     <div class="tile"><div class="n" style="color:var(--info)">7</div><div class="l">Informational</div></div>
-    <div class="tile"><div class="n" style="color:var(--ok)">53+8</div><div class="l">Tests (after)</div></div>
+    <div class="tile"><div class="n" style="color:var(--ok)">60</div><div class="l">Tests executed</div></div>
   </div>
 
   <table>
@@ -377,6 +377,8 @@
   <li><strong>Listing account layout changed</strong> (+2 bytes). Any devnet deployment with existing listings must be reset; mainnet is unaffected because the program is not yet deployed.</li>
 </ul>
 <h3>Squads hardening, end to end</h3>
+<p class="note"><strong>Superseded.</strong> These steps describe the deploy flow at the second pass. The launch flow changed in section 9: the deploy is one run with no multisig input, the config admin stays a team-held key, and the upgrade authority moves by SAT in Squads afterwards.</p>
+
 <ol>
   <li><code>pnpm deploy:prod --multisig &lt;vault&gt; --squads &lt;settings&gt; --keypair deployer.json --confirm</code>: deploy, initialize with the deployer as interim admin, propose the vault. The vault address must derive as vault N of the settings account under the Squads v4 program.</li>
   <li>In Squads, import and execute the printed <code>accept_authority</code> transaction. The vault is now the swap admin and has proven it can sign.</li>
@@ -389,6 +391,41 @@
   <li>The Anchor integration suite (53 cases) was typechecked but not executed. Run <code>pnpm test</code> locally before merging.</li>
   <li>The deploy, upgrade, admin and verify scripts were typechecked but never run against a cluster. Rehearse the full sequence above on devnet with a devnet Squad.</li>
   <li>I-02 remains unconfirmed; <code>pnpm verify:mainnet</code> is the one-command check.</li>
+</ul>
+
+<h2>9. Third pass: executed verification and launch readiness</h2>
+<p class="small">Branch <code>audit-remediation</code>, 4 October 2026, run from a workstation with a local validator (Token Metadata cloned from mainnet) and mainnet RPC. This pass did what sections 7 and 8 could not: it ran the tests and the scripts, and checked the chain.</p>
+
+<h3>Integration suite executed</h3>
+<p>The 60-case Mocha suite (the 53 cases from the remediation plus 7 escape attempts) was executed against a local validator with Token Metadata cloned from mainnet, on the rebuilt binary at the final program ID: 60 passing, 0 failing, 0 skipped, 50 minutes. After the crate version was set to 1.0.0 for release (which changes the binary, though not its logic), the suite was run again on that binary: all 60 cases pass. Three cases timed out in the first full run while the build machine was heavily loaded by unrelated processes; those three and the cases the run had not reached were then run on a fresh validator and passed, so every case has passed on the release binary. The Rust unit tests pass (8 of 8). This closes the "typechecked but not executed" caveat in sections 7 and 8 and verifies I-01, I-06 and the L-01, L-03 and L-04 fixes by execution. The suite now includes a block of seven escape attempts against a listed NFT, each run as its owner through Token Metadata and SPL Token rather than through the program: <code>UnlockV1</code>, <code>ThawDelegatedAccount</code> signed by the owner and by the collection update authority, SPL <code>Revoke</code> and <code>RevokeStandardV1</code>, <code>TransferV1</code>, <code>BurnV1</code> and legacy <code>BurnNft</code>. Every attempt fails with the expected upstream error and the token account stays frozen, delegated to the Listing PDA, with the listing intact. This is the invariant from section 2, observed rather than argued.</p>
+
+<h3>Mainnet assumptions confirmed (closes I-02)</h3>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Collection <code>2k8iNEAB…</code></td><td>Exists, metadata and master edition present, token standard NonFungible, name "The Chimpions". Its own token has supply 0 (burned or never minted); the program never reads the collection mint, only each member's verified collection pointer, so this changes nothing.</td></tr>
+<tr><td>Members (Helius DAS: 222, interface V1_NFT; 25 sampled across the list)</td><td>25/25 legacy NonFungible, 25/25 verified in the collection, 25/25 with the master edition as the mint's freeze authority. This is exactly the shape <code>list</code> requires.</td></tr>
+<tr><td>Treasury <code>Df7VuBka…</code></td><td>System-owned wallet, rent exempt (about 45 SOL).</td></tr>
+<tr><td>Program <code>GrA1LdMT…</code></td><td>Not deployed; config PDA unused. Deploy preflight passes up to the funding check.</td></tr>
+</table>
+
+<h3>Upgrade authority handoff to a 5-of-9 Squads vault</h3>
+<p>The team's decision is a Squads multisig with threshold 5 of 9 holding the upgrade authority, moved by Safe Authority Transfer (SAT) run directly in Squads. Per the Squads documentation, the current authority wallet is added to the Squad as a member and executes the SAT once the threshold is met; the vault PDA and that wallet co-sign, so <code>--skip-new-upgrade-authority-signer-check</code> is never used. <code>scripts/deploy-mainnet.ts</code> was changed accordingly:</p>
+<p><strong>Config admin stays a team-held key, and the deploy script stays clear of the multisig.</strong> The team chose to keep <code>Config.authority</code> on the deployer key rather than the multisig, so an emergency pause or eject does not wait for 5 of 9 approvals. This revises the M-02 remediation: the vault never runs <code>accept_authority</code>. The trade-off is acceptable because the admin role cannot move an NFT except back to its owner. A compromised admin key could pause the board, redirect treasury fees, raise the fee toward the 1 SOL cap (takers still sign a maximum) and take the admin role; the multisig, as upgrade authority, can recover from all of these with an upgrade. The deploy is now a single resumable run that deploys, creates the Anchor IDL account, initializes, publishes the IDL and security.txt, and then verifies: the on-chain program bytes equal the local build, the admin is the deployer with no pending handoff (a leftover proposal would let that key take the role), the Anchor IDL and both Program Metadata accounts match the local files, and the config holds the expected collection. The same checks run on their own with <code>--verify</code>. The upgrade authority is moved afterwards by SAT in Squads, which has the vault co-sign and so proves control; the script only reports who holds it. The Anchor IDL authority stays with the deployer.</p>
+<ul>
+<li>The script never moves the upgrade authority and takes no multisig input. The CLI transfer with the signer check skipped was removed.</li>
+<li>Confirming the Squad's threshold and time lock, and that the post-SAT upgrade authority is the Chimpions vault, are manual steps in Squads; <code>--verify</code> prints the upgrade authority so it can be compared.</li>
+<li>After the SAT, remove the deployer from the Squad's members. With Vote it would count toward the threshold and with Execute it could run approved proposals. The script does not check this; confirm it in Squads.</li>
+</ul>
+
+<h3>Program ID</h3>
+<p>The program was re-keyed to the vanity address <code>GrA1LdMTRsZPrLZLjbZbQ9Cx4XNbyL1bz7enprBkDv49</code> before deploy. <code>declare_id!</code>, Anchor.toml and the IDL were synced and the binary rebuilt; the integration suite above ran against this ID. The program keypair is stored outside version control. The earlier devnet deployment at <code>6hXfvd34…</code> is orphaned and uses the pre-remediation Listing layout; the next devnet setup deploys fresh.</p>
+
+<h3>Still open</h3>
+<ul>
+<li><strong>Squad time lock</strong> (M-01): set in Squads, published with the threshold. The deploy script reports the live value.</li>
+<li><strong>Verifiable build</strong> (I-03): <code>solana-verify</code> is not installed on the build machine and the Anchor CLI in use is 0.31.1 while the program pins 0.32.1. Build the release binary with <code>solana-verify</code> from the tagged commit before the Squad approves anything.</li>
+<li><strong>Web client</strong> (L-02, L-04, I-01): pass the quoted fee as <code>max_fee_lamports</code>, offer the one-click revoke after an eject, and state plainly that a listing accepts any Chimpion.</li>
+<li><strong>IDL and security.txt</strong> (resolved in the deploy script): Anchor 0.32's IDL account creation needs only a signer, and the creator becomes its authority, so whoever creates it first owns the fixed IDL address and could publish a misleading interface. Run 1 now creates it immediately after the deploy, waiting only until the program is invocable, and refuses to continue if it already exists under another authority. Run 1 also writes the IDL and <code>security.json</code> as canonical Program Metadata accounts (<code>ProgM6JCC…</code>). Only the upgrade authority can create those, and they pass to the vault with it. Uploads were rehearsed on devnet, including the multi-transaction IDL write, and read back identical. The security contacts in <code>security.json</code> must be filled in before run 1 will start.</li>
 </ul>
 
 <h2>Appendix A. Files reviewed</h2>

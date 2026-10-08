@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Grail Grove Security Review: summary card</title>
+<style>
+  :root {
+    --bg: #15171b; --panel: #1f2228; --rule: #2d313a; --ink: #eef0f3; --muted: #9aa3b2;
+    --ok: #3ddc84; --med: #f0b429; --low: #5aa9ff; --info: #8b95a7; --accent: #c8f04f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); }
+  body { width: 1600px; height: 1000px; color: var(--ink); font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; padding: 56px 64px; display: flex; flex-direction: column; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid var(--rule); padding-bottom: 22px; }
+  h1 { font-size: 46px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 22px; margin-top: 6px; }
+  .meta { text-align: right; color: var(--muted); font-size: 17px; line-height: 1.55; }
+  .meta code { color: var(--ink); }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  .tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin: 28px 0 26px; }
+  .tile { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 14px 14px; text-align: center; }
+  .tile .n { font-size: 44px; font-weight: 700; line-height: 1; }
+  .tile .l { color: var(--muted); font-size: 14px; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tile .s { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; flex: 1; }
+  .box { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 26px; }
+  .box h2 { font-size: 21px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
+  .box h2.ok { color: var(--ok); } .box h2.open { color: var(--med); }
+  ul { margin: 0; padding-left: 22px; font-size: 19px; line-height: 1.42; }
+  li { margin: 7px 0; } li strong { color: #fff; }
+  .right { display: flex; flex-direction: column; gap: 22px; }
+  .right .box { flex: 1; }
+  footer { display: flex; justify-content: space-between; color: var(--muted); font-size: 16px; margin-top: 24px; border-top: 1px solid var(--rule); padding-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Grail Grove: security review</h1>
+    <div class="sub">Non-custodial 1-for-1 Chimpions NFT swap on Solana</div>
+  </div>
+  <div class="meta">
+    Program <code>GrA1LdMTRsZPrLZLjbZbQ9Cx4XNbyL1bz7enprBkDv49</code><br>
+    Branch <code>audit-remediation</code> · 4 October 2026<br>
+    Three passes: review, re-audit, executed verification
+  </div>
+</header>
+
+<div class="tiles">
+  <div class="tile"><div class="n" style="color:var(--ok)">0</div><div class="l">Critical</div></div>
+  <div class="tile"><div class="n" style="color:var(--ok)">0</div><div class="l">High</div></div>
+  <div class="tile"><div class="n" style="color:var(--med)">2</div><div class="l">Medium</div><div class="s">fixed / mitigated</div></div>
+  <div class="tile"><div class="n" style="color:var(--low)">6</div><div class="l">Low</div><div class="s">all fixed</div></div>
+  <div class="tile"><div class="n" style="color:var(--info)">7</div><div class="l">Info</div><div class="s">2 open, operational</div></div>
+  <div class="tile"><div class="n" style="color:var(--ok)">60</div><div class="l">Tests passing</div><div class="s">run, not just written</div></div>
+</div>
+
+<div class="cols">
+  <div class="box">
+    <h2>What protects a listed Chimpion</h2>
+    <ul>
+      <li><strong>It never leaves your wallet.</strong> Listing freezes the NFT in place with the per-listing program address as its only delegate.</li>
+      <li><strong>Nothing else can move it.</strong> Transfer, burn, approve, revoke, owner change and close are all rejected while frozen. We tried each one from the owner's wallet and through Token Metadata; all fail.</li>
+      <li><strong>Swaps are all-or-nothing.</strong> Both NFTs and the fee move in one instruction or none do. The offered NFT must be a verified Chimpion the taker holds. Your fee split is locked when you list.</li>
+      <li><strong>You can always exit.</strong> Delist works even when the board is paused. The admin can only return NFTs to their owners, never redirect them.</li>
+      <li><strong>The program holds nothing.</strong> No vault, no custody, no pooled SOL. Fees pass straight to the treasury and the lister.</li>
+    </ul>
+  </div>
+  <div class="right">
+    <div class="box">
+      <h2 class="ok">Verified against live data</h2>
+      <ul>
+        <li>222 Chimpions on chain; 25 sampled across the collection are all legacy NFTs, verified members, with the freeze authority the program requires.</li>
+        <li>Treasury is a plain system wallet; program address unused before deploy.</li>
+        <li>Dependencies: zero known vulnerabilities (cargo audit).</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h2 class="open">The one trust point, and how it is held</h2>
+      <ul>
+        <li>Only a <strong>program upgrade</strong> could ever touch listed NFTs.</li>
+        <li>At launch the upgrade authority moves to a <strong>5-of-9 Squads multisig</strong> by Safe Authority Transfer; no hot wallet keeps it.</li>
+        <li>Every upgrade is a vault-owned buffer anyone can verify byte-for-byte before members approve.</li>
+        <li>Still to do: publish the Squad's time lock, ship a reproducible build.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div>Reviewed by Claude: automated code review with manual reasoning, re-audit of fixes, executed test and mainnet verification. Full report attached.</div>
+  <div>github.com/TheChimpions/grail-grove</div>
+</footer>
+</body>
+</html>

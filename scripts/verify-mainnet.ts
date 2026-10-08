@@ -139,7 +139,13 @@ async function main() {
   report(!!colMintInfo && colMintInfo.owner.equals(TOKEN_PROGRAM_ID), "collection mint exists and is an SPL Token mint");
   if (colMintInfo) {
     const m = parseMint(colMintInfo.data);
-    report(m.supply === 1n && m.decimals === 0, "collection mint is single-supply", `supply ${m.supply}, decimals ${m.decimals}`);
+    report(m.decimals === 0 && m.supply <= 1n, "collection mint is an NFT mint", `supply ${m.supply}, decimals ${m.decimals}`);
+    if (m.supply === 0n) {
+      // The program never reads the collection mint itself: membership is the
+      // verified `collection` pointer on each member's metadata. A burned (or
+      // never minted) collection token changes nothing for list or swap.
+      console.log("  info collection token supply is 0 (burned or never minted); harmless, the program only checks members' verified collection pointer");
+    }
   }
   const colMeta = await connection.getAccountInfo(metadataPda(CHIMPIONS_COLLECTION));
   report(!!colMeta, "collection metadata exists");

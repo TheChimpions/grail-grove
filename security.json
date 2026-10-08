@@ -1,0 +1,9 @@
+{
+  "name": "Grail Grove",
+  "description": "Non-custodial 1-for-1 Chimpions NFT swap. Listed NFTs stay frozen in the owner's wallet; only the program can thaw them.",
+  "contacts": ["email:firstborn@chimpions.co"],
+  "policy": "https://github.com/TheChimpions/grail-grove/blob/main/SECURITY.md",
+  "preferred_languages": ["en"],
+  "source_code": "https://github.com/TheChimpions/grail-grove",
+  "version": "1.0.0"
+}
