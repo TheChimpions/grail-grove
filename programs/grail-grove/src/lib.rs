@@ -14,7 +14,22 @@ pub use errors::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("6hXfvd34FyPaU3tRRhwxiWBLBLeb77GsTkXfpBGptUeC");
+declare_id!("GrA1LdMTRsZPrLZLjbZbQ9Cx4XNbyL1bz7enprBkDv49");
+
+// Embedded security contact, readable from the deployed binary by explorers
+// and security tools. Keep in sync with security.json (published separately
+// as Program Metadata). Gated so crates that import this one as a library
+// (feature "no-entrypoint") do not get a duplicate section.
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "Grail Grove",
+    project_url: "https://github.com/TheChimpions/grail-grove",
+    contacts: "email:firstborn@chimpions.co",
+    policy: "https://github.com/TheChimpions/grail-grove/blob/main/SECURITY.md",
+    preferred_languages: "en",
+    source_code: "https://github.com/TheChimpions/grail-grove",
+    source_release: "v1.0.0"
+}
 
 /// Non-custodial 1-for-1 swap board for The Chimpions.
 ///

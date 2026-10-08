@@ -22,10 +22,12 @@ pub struct UpdateConfig<'info> {
     pub config: Account<'info, Config>,
     pub authority: Signer<'info>,
 
-    /// CHECK: pass to change the fee recipient. Must already exist and be
-    /// funded so fee transfers never fail the rent-exemption check.
+    /// CHECK: pass to change the fee recipient. Must be a rent-exempt system
+    /// account (see `Initialize::treasury`).
     #[account(
-        constraint = new_treasury.key() != Pubkey::default() && new_treasury.lamports() > 0
+        constraint = new_treasury.key() != Pubkey::default()
+            && *new_treasury.owner == anchor_lang::system_program::ID
+            && new_treasury.lamports() >= Rent::get()?.minimum_balance(0)
             @ GrailGroveError::InvalidTreasury,
     )]
     pub new_treasury: Option<UncheckedAccount<'info>>,

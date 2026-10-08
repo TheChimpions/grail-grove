@@ -22,7 +22,10 @@
  *   --cluster devnet|mainnet|localnet   builds the Helius URL from HELIUS_API_KEY
  *   --rpc <url>                         explicit endpoint (overrides --cluster)
  *   --program <pk>
- * With neither, this talks to mainnet-beta.
+ *   --yes                               skip the interactive mainnet confirmation
+ * One of --cluster or --rpc is required: there is no implicit default cluster.
+ * Sending (not --print) requires --keypair; the default Solana CLI keypair is
+ * never picked up implicitly. Sends to mainnet ask for confirmation.
  */
 import * as anchor from "@coral-xyz/anchor";
 import { BN } from "@coral-xyz/anchor";
@@ -39,12 +42,14 @@ import {
 import bs58 from "bs58";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stdin, stdout } from "node:process";
+import { createInterface } from "node:readline/promises";
 import idl from "../target/idl/grail_grove.json";
 import type { GrailGrove } from "../target/types/grail_grove";
 
 const TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const BPF_LOADER_UPGRADEABLE_ID = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
-const MAINNET = "https://api.mainnet-beta.solana.com";
+const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const LOCALNET = "http://127.0.0.1:8899";
 
 // --- arg parsing -----------------------------------------------------------
@@ -122,7 +127,7 @@ function resolveRpc(): string {
     return explicit;
   }
   const cluster = flag("cluster");
-  if (!cluster) return MAINNET;
+  if (!cluster) fail("pass --cluster devnet|mainnet|localnet or --rpc <url>; there is no default");
   if (cluster === "localnet" || cluster === "local") return LOCALNET;
   const host = cluster === "devnet" ? "devnet" : "mainnet";
   const key = heliusKey();
@@ -146,7 +151,9 @@ if (printMode) {
 } else if (command === "show" && !flag("keypair")) {
   actor = PublicKey.default; // read-only, nothing to sign
 } else {
-  const path = flag("keypair") ?? `${process.env.HOME}/.config/solana/id.json`;
+  const path =
+    flag("keypair") ??
+    fail("--keypair <path> is required to send a transaction (or build one with --authority <pk> --print)");
   signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
   actor = signer.publicKey;
 }
@@ -182,9 +189,22 @@ async function emit(label: string, ixs: TransactionInstruction[]): Promise<void>
     console.log(bs58.encode(serialized));
     return;
   }
+  await confirmMainnet(label);
   console.log(`sending to ${safeRpc} as ${actor.toBase58()}`);
   const sig = await provider.sendAndConfirm(tx, []);
   console.log(`${label}: ${sig}`);
+}
+
+/** A signed send to mainnet must be acknowledged interactively (or with --yes). */
+async function confirmMainnet(label: string): Promise<void> {
+  if (flag("yes") === "true") return;
+  if ((await connection.getGenesisHash()) !== MAINNET_GENESIS) return;
+  const rl = createInterface({ input: stdin, output: stdout });
+  const answer = await rl.question(
+    `About to send "${label}" to MAINNET signed by ${actor.toBase58()}. Type mainnet to continue: `,
+  );
+  rl.close();
+  if (answer.trim() !== "mainnet") fail("aborted");
 }
 
 // --- commands -------------------------------------------------------------
